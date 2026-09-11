@@ -1,8 +1,8 @@
 [package]
-name = "keybeam"
+name = "clipbeam"
 version = "0.1.0"
 edition = "2021"
-description = "KeyBeam Clipboard - host/remote clipboard bridge over keyboard and QR channels"
+description = "ClipBeam - host/remote clipboard bridge over keyboard and QR channels"
 
 [dependencies]
 enigo = "0.6"

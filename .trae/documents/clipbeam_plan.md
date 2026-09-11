@@ -1,4 +1,4 @@
-# KeyBeam Clipboard 双向剪贴板书桥 实现计划
+# ClipBeam 双向剪贴板书桥 实现计划
 
 ## 目标与背景
 
@@ -44,7 +44,7 @@
 
   * 设置窗口：`egui` + `egui-winit` + `egui_glow`（复用已有 winit 事件循环按需开窗，跨平台 OpenGL，不引入第二事件循环）
 
-  * 配置持久化：`serde` + `serde_json` + `dirs`（JSON 存于 `~/Library/Application Support/KeyBeam/config.json` 与 `%APPDATA%/KeyBeam/config.json`）
+  * 配置持久化：`serde` + `serde_json` + `dirs`（JSON 存于 `~/Library/Application Support/ClipBeam/config.json` 与 `%APPDATA%/ClipBeam/config.json`）
 
   * 通知按平台 cfg 分发：macOS `mac-notification-sys` 0.6；Windows `wintoast`（Toast，底层 windows crate）。不选 notify-rust（不支持 Windows）。
 
@@ -61,7 +61,7 @@
 打字流帧格式（实际无空格，`0`/`1` 为数字行物理按键）：
 
 ```
-KeyBeam Clipboard（标题）
+ClipBeam（标题）
 ─────────────
 发送到远程（宿主机剪贴板）      <发送热键>
 从远程接收                      <接收热键>
@@ -80,7 +80,7 @@ KeyBeam Clipboard（标题）
 
 * `0`：起始/字段分隔符；`1`：整帧结束符。只用数字行 0/1 做控制符——免 Shift 且在各键盘布局上物理位置最稳定。
 
-* `keybeam1`：固定魔术头（含协议版本 v1），防用户正常输入误触发接收状态机。
+* `clipbeam1`：固定魔术头（含协议版本 v1），防用户正常输入误触发接收状态机。
 
 * CRC32 摘要仅 7 个 base32 字符，避免 hex 中的 0/1/8/9 与控制符冲突。
 
@@ -103,7 +103,7 @@ KeyBeam Clipboard（标题）
 每帧二维码文本（`.` 也属于 QR alphanumeric 允许字符集）：
 
 ```
-KB1.<总帧数>.<序号>.<整包CRC32的base32大写(7字符)>.<本分块base32数据>
+CB1.<总帧数>.<序号>.<整包CRC32的base32大写(7字符)>.<本分块base32数据>
 ```
 
 * 不设每帧 CRC：QR Reed-Solomon 已保证帧内位级正确；整包 CRC32 同时承担批次标识与组包校验。
@@ -114,7 +114,7 @@ KB1.<总帧数>.<序号>.<整包CRC32的base32大写(7字符)>.<本分块base32�
 
 ### 协议 C：键盘部署接收页（一次性引导通道）
 
-* 编译期 `include_str!("../web/keybeam.html")` 把接收页嵌进二进制。
+* 编译期 `include_str!("../web/clipbeam.html")` 把接收页嵌进二进制。
 
 * 部署时生成**自解压 HTML** 文本：极小引导头（含约 15 行 base32 解码 + `TextDecoder` + `document.write`，全 ASCII 标点/大小写）+ 模板字符串内嵌 `BASE32(接收页全文)`（主体，全小写免 Shift）+ 引导尾。
 
@@ -123,7 +123,7 @@ KB1.<总帧数>.<序号>.<整包CRC32的base32大写(7字符)>.<本分块base32�
   1. 远程打开记事本（Win+R → `notepad`）并点击编辑区；
   2. 宿主机托盘选"键盘部署接收页到远程"；
   3. Rust 等待 200ms 后逐键打完自解压 HTML（同 3ms 节奏、可取消）；
-  4. 用户 Ctrl+S 另存为 `keybeam.html`（自解压内容全 ASCII，记事本 ANSI 编码也不会损坏），双击打开即得完整接收页。
+  4. 用户 Ctrl+S 另存为 `clipbeam.html`（自解压内容全 ASCII，记事本 ANSI 编码也不会损坏），双击打开即得完整接收页。
 
 * 同时提供"复制自解压 HTML 到宿主机剪贴板"菜单项：若远程恰好有其他粘贴/文件通道，可一键走捷径。
 
@@ -132,7 +132,7 @@ KB1.<总帧数>.<序号>.<整包CRC32的base32大写(7字符)>.<本分块base32�
 ## Files and Modules
 
 ```
-keybeam-clipboard/
+clipbeam/
 ├── Cargo.toml
 ├── assets/
 │   └── icon.png          # 托盘图标（自绘极简小图，include_bytes! 内嵌）
@@ -153,13 +153,13 @@ keybeam-clipboard/
 │   ├── tray.rs           # tray-icon 图标/菜单构建、状态文案与 tooltip 更新
 │   └── notify.rs         # #[cfg] 分发：macOS mac-notification-sys / Windows wintoast
 └── web/
-    └── keybeam.html      # 唯一交付的接收页：内联 CSS+应用JS+CRC32+base32+qrcode 库（单文件目标 ≤ ~25KB）
+    └── clipbeam.html      # 唯一交付的接收页：内联 CSS+应用JS+CRC32+base32+qrcode 库（单文件目标 ≤ ~25KB）
 ```
 
 托盘菜单：
 
 ```
-KeyBeam Clipboard（标题）
+ClipBeam（标题）
 ─────────────
 发送到远程（宿主机剪贴板）      <发送热键>
 从远程接收                      <接收热键>
@@ -180,7 +180,7 @@ KeyBeam Clipboard（标题）
 
 1. **脚手架、配置与协议层**：`cargo init`；加依赖（enigo 0.6.1、arboard 3、global-hotkey 0.8、tray-icon 0.24、winit 0.30、egui/egui-winit/egui\_glow、xcap 0.9 `image` feature、rqrr 0.11、image、data-encoding 2、serde/serde\_json、dirs、clap 4；cfg 依赖 mac-notification-sys / wintoast）。实现 `protocol.rs`（base32 无填充 + CRC32 表驱动 + 键盘帧/QR 帧构造解析）、`config.rs`（默认值/范围校验/JSON 读写/热键字符串解析与格式化）、`cancel.rs`（取消令牌）；先写单元测试（CRC32 标准向量、中英文/emoji/空串/非对齐长度往返、坏帧忽略、配置往返）。
 2. **发送核心（无 UI 先行）**：`typer.rs` + `send.rs`；`send-once` 子命令验证：读剪贴板 → settle → 组帧逐键发送（参数全部取自 Config）→ **每字符前查取消令牌**；非文本/超限错误返回；中止返回已发送字符数。
-3. **单文件接收页·入站**：创建 `web/keybeam.html`，内联极简 CSS 与自实现 base32/CRC32；键盘状态机（魔术头、10 秒复位、暂停开关、吞键、进度）；writeText + 手动复制兜底。与步骤 2 做本地 E2E（ASCII/中文/emoji/50KB/Esc 取消/误触）。
+3. **单文件接收页·入站**：创建 `web/clipbeam.html`，内联极简 CSS 与自实现 base32/CRC32；键盘状态机（魔术头、10 秒复位、暂停开关、吞键、进度）；writeText + 手动复制兜底。与步骤 2 做本地 E2E（ASCII/中文/emoji/50KB/Esc 取消/误触）。
 4. **单文件接收页·出站**：把 qrcode-generator 压缩版以内联 `<script>` 放入同一 HTML（头部注释标注来源与 MIT 许可）；readText + 粘贴兜底、base32 大写、CRC32、800 字符分帧、300ms 循环播放、停止。确认单文件体积 ≤ \~25KB 且断网打开可用。
 5. **接收核心（无 UI 先行）**：`receive.rs` + `recv-once` 子命令：xcap 截屏 → 灰度降采样 → rqrr → QR 帧解析 → 去重/批次重置 → 超时/取消 → CRC32 校验 → arboard 写回。与步骤 4 E2E：单帧/多帧/缺帧超时/播放中换批次自动重置。
 6. **键盘部署功能**：`deploy.rs`：自解压 HTML 生成器（引导头 + base32 主体 + 引导尾），复用 typer 输出；另提供复制到剪贴板变体；手工演练记事本 → 另存 .html → 打开后页面完整可用。
@@ -225,7 +225,7 @@ KeyBeam Clipboard（标题）
 
 * 二维码通道 E2E：单帧/多帧、缺帧超时通知、播放中重新生成（换批次 CRC32）接收端自动重置、写回剪贴板内容一致。
 
-* 部署通道 E2E：记事本接收自解压 HTML → 另存 `keybeam.html` → 打开后入站/出站功能与原单文件一致。
+* 部署通道 E2E：记事本接收自解压 HTML → 另存 `clipbeam.html` → 打开后入站/出站功能与原单文件一致。
 
 * 权限拒绝路径：writeText/readText 兜底文本框可用；macOS 未授权时通知可读。
 

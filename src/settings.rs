@@ -8,9 +8,7 @@ use egui::{Align, Context, Layout};
 use glutin::config::ConfigTemplateBuilder;
 use glutin::context::{ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext};
 use glutin::display::{GetGlDisplay, GlDisplay};
-use glutin::surface::{
-    GlSurface, Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface,
-};
+use glutin::surface::{GlSurface, Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use glutin_winit::{DisplayBuilder, GlWindow};
 use raw_window_handle::HasWindowHandle;
 use winit::event::WindowEvent;
@@ -51,16 +49,18 @@ pub struct SettingsWindow {
 impl SettingsWindow {
     pub fn open(elwt: &ActiveEventLoop, cfg: &Config) -> Result<Self, String> {
         let window_attributes = Window::default_attributes()
-            .with_title("KeyBeam 设置")
+            .with_title("ClipBeam 设置")
             .with_inner_size(winit::dpi::LogicalSize::new(480.0, 620.0))
             .with_resizable(false)
             .with_window_icon(Some(crate::tray::window_icon()));
 
         let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
         let (window, gl_config) = display_builder
-            .build(elwt, ConfigTemplateBuilder::new().with_alpha_size(8), |mut cs| {
-                cs.next().expect("至少存在一个 GL 配置")
-            })
+            .build(
+                elwt,
+                ConfigTemplateBuilder::new().with_alpha_size(8),
+                |mut cs| cs.next().expect("至少存在一个 GL 配置"),
+            )
             .map_err(|e| format!("创建设置窗口失败: {e}"))?;
         let window = window.ok_or("winit 未返回窗口")?;
 
@@ -84,10 +84,7 @@ impl SettingsWindow {
             .make_current(&gl_surface)
             .map_err(|e| format!("激活 GL 上下文失败: {e}"))?;
         gl_surface
-            .set_swap_interval(
-                &gl_context,
-                SwapInterval::Wait(NonZeroU32::new(1).unwrap()),
-            )
+            .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
             .ok();
 
         let glow_ctx = unsafe {
@@ -124,7 +121,9 @@ impl SettingsWindow {
     pub fn handle_event(&mut self, event: &WindowEvent, modifiers: ModifiersState) -> bool {
         // 热键捕获优先截获按键。
         if let WindowEvent::KeyboardInput { event: ke, .. } = event {
-            if self.capture.is_some() && ke.state == winit::event::ElementState::Pressed && !ke.repeat
+            if self.capture.is_some()
+                && ke.state == winit::event::ElementState::Pressed
+                && !ke.repeat
             {
                 if let PhysicalKey::Code(code) = ke.physical_key {
                     if let Some(spec) = hotkey_spec(code, modifiers) {
@@ -175,24 +174,50 @@ impl SettingsWindow {
 
         self.egui.run(&self.window, |ctx: &Context| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                ui.heading("KeyBeam 设置");
+                ui.heading("ClipBeam 设置");
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new("热键（全局，任意焦点下生效）").strong());
                 ui.add_space(4.0);
-                hotkey_row(ui, "发送（宿主机→远程）", &mut draft.send_hotkey, capture, CaptureField::Send);
-                hotkey_row(ui, "接收（远程→宿主机）", &mut draft.recv_hotkey, capture, CaptureField::Recv);
-                hotkey_row(ui, "中止（任务运行时生效）", &mut draft.stop_hotkey, capture, CaptureField::Stop);
+                hotkey_row(
+                    ui,
+                    "发送（宿主机→远程）",
+                    &mut draft.send_hotkey,
+                    capture,
+                    CaptureField::Send,
+                );
+                hotkey_row(
+                    ui,
+                    "接收（远程→宿主机）",
+                    &mut draft.recv_hotkey,
+                    capture,
+                    CaptureField::Recv,
+                );
+                hotkey_row(
+                    ui,
+                    "中止（任务运行时生效）",
+                    &mut draft.stop_hotkey,
+                    capture,
+                    CaptureField::Stop,
+                );
 
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new("时序与阈值").strong());
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label("逐键间隔");
-                    ui.add(egui::DragValue::new(&mut draft.key_delay_ms).range(0..=100).suffix(" ms"));
+                    ui.add(
+                        egui::DragValue::new(&mut draft.key_delay_ms)
+                            .range(0..=100)
+                            .suffix(" ms"),
+                    );
                 });
                 ui.horizontal(|ui| {
                     ui.label("发送前 settle 等待");
-                    ui.add(egui::DragValue::new(&mut draft.settle_ms).range(0..=5000).suffix(" ms"));
+                    ui.add(
+                        egui::DragValue::new(&mut draft.settle_ms)
+                            .range(0..=5000)
+                            .suffix(" ms"),
+                    );
                 });
                 ui.horizontal(|ui| {
                     ui.label("二维码接收超时");
@@ -204,7 +229,11 @@ impl SettingsWindow {
                 });
                 ui.horizontal(|ui| {
                     ui.label("文本大小上限");
-                    ui.add(egui::DragValue::new(&mut draft.max_text_kb).range(1..=10_240).suffix(" KB"));
+                    ui.add(
+                        egui::DragValue::new(&mut draft.max_text_kb)
+                            .range(1..=10_240)
+                            .suffix(" KB"),
+                    );
                 });
 
                 // 校验信息
@@ -212,28 +241,27 @@ impl SettingsWindow {
                 errs.extend(hotkey_parse_errors(draft));
                 ui.add_space(8.0);
                 if let Some(first) = errs.first() {
-                    ui.label(egui::RichText::new(format!("✗ {first}")).color(egui::Color32::from_rgb(0xff, 0x6b, 0x6b)));
+                    ui.label(
+                        egui::RichText::new(format!("✗ {first}"))
+                            .color(egui::Color32::from_rgb(0xff, 0x6b, 0x6b)),
+                    );
                 }
 
                 // 按钮区：吃掉剩余高度，按钮固定在右下角。
                 let avail = ui.available_size();
-                ui.allocate_ui_with_layout(
-                    avail,
-                    Layout::right_to_left(Align::BOTTOM),
-                    |ui| {
-                        ui.add_space(6.0);
-                        let save = ui
-                            .add_enabled(errs.is_empty(), egui::Button::new("保存"))
-                            .on_hover_text("保存配置并重注册热键");
-                        if save.clicked() {
-                            saved = Some(draft.clone());
-                        }
-                        ui.add_space(8.0);
-                        if ui.button("取消").clicked() {
-                            close = true;
-                        }
-                    },
-                );
+                ui.allocate_ui_with_layout(avail, Layout::right_to_left(Align::BOTTOM), |ui| {
+                    ui.add_space(6.0);
+                    let save = ui
+                        .add_enabled(errs.is_empty(), egui::Button::new("保存"))
+                        .on_hover_text("保存配置并重注册热键");
+                    if save.clicked() {
+                        saved = Some(draft.clone());
+                    }
+                    ui.add_space(8.0);
+                    if ui.button("取消").clicked() {
+                        close = true;
+                    }
+                });
             });
         });
 
@@ -348,9 +376,10 @@ fn install_cjk_font(egui: &EguiGlow) {
         return;
     };
     let mut fonts = egui::FontDefinitions::default();
-    fonts
-        .font_data
-        .insert("sys_cjk".to_owned(), egui::FontData::from_owned(data).into());
+    fonts.font_data.insert(
+        "sys_cjk".to_owned(),
+        egui::FontData::from_owned(data).into(),
+    );
     for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
         fonts
             .families

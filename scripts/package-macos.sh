@@ -1,6 +1,6 @@
 #!/bin/bash
 # 把 release 二进制打包成标准 macOS .app：
-#   target/release/bundle/KeyBeam.app
+#   target/release/bundle/ClipBeam.app
 # 双击（或 open）启动，无终端窗口；LSUIElement=1，不占 Dock，仅菜单栏图标。
 #
 # 用法：
@@ -12,8 +12,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
 VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
-APP_NAME="KeyBeam"
-BUNDLE_ID="com.keybeam.app"
+APP_NAME="ClipBeam"
+BIN_NAME="clipbeam"
+BUNDLE_ID="com.clipbeam.app"
 PROFILE="release"
 BUNDLE_DIR="target/${PROFILE}/bundle"
 APP="${BUNDLE_DIR}/${APP_NAME}.app"
@@ -22,17 +23,17 @@ echo "==> cargo build --release"
 cargo build --release
 
 echo "==> 定位构建期生成的 1024px 图标"
-ICON_PNG="$(ls -t target/${PROFILE}/build/keybeam-*/out/keybeam_icon_1024.png 2>/dev/null | head -1 || true)"
+ICON_PNG="$(ls -t target/${PROFILE}/build/clipbeam-*/out/clipbeam_icon_1024.png 2>/dev/null | head -1 || true)"
 if [[ -z "${ICON_PNG}" || ! -f "${ICON_PNG}" ]]; then
-  echo "找不到 keybeam_icon_1024.png（build.rs 产物），请先 cargo build --release" >&2
+  echo "找不到 clipbeam_icon_1024.png（build.rs 产物），请先 cargo build --release" >&2
   exit 1
 fi
 
 echo "==> 组装 ${APP}"
 rm -rf "${APP}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
-cp "target/${PROFILE}/keybeam" "${APP}/Contents/MacOS/keybeam"
-chmod +x "${APP}/Contents/MacOS/keybeam"
+cp "target/${PROFILE}/${BIN_NAME}" "${APP}/Contents/MacOS/${BIN_NAME}"
+chmod +x "${APP}/Contents/MacOS/${BIN_NAME}"
 printf 'APPL????' > "${APP}/Contents/PkgInfo"
 
 # ---- Info.plist（LSUIElement=1 → 无 Dock、纯菜单栏应用）----
@@ -54,9 +55,9 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>keybeam</string>
+    <string>${BIN_NAME}</string>
     <key>CFBundleIconFile</key>
-    <string>keybeam.icns</string>
+    <string>${BIN_NAME}.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>LSMinimumSystemVersion</key>
@@ -66,13 +67,13 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>KeyBeam Clipboard</string>
+    <string>ClipBeam</string>
 </dict>
 </plist>
 PLIST
 
 # ---- .icns（sips 切全尺寸 + iconutil 合成）----
-ICONSET="$(mktemp -d)/keybeam.iconset"
+ICONSET="$(mktemp -d)/${BIN_NAME}.iconset"
 mkdir -p "${ICONSET}"
 gen() { sips -z "$2" "$2" "${ICON_PNG}" --out "${ICONSET}/$1" >/dev/null; }
 gen icon_16x16.png        16
@@ -85,7 +86,7 @@ gen icon_256x256.png      256
 gen icon_256x256@2x.png   512
 gen icon_512x512.png      512
 gen icon_512x512@2x.png   1024
-iconutil -c icns "${ICONSET}" -o "${APP}/Contents/Resources/keybeam.icns"
+iconutil -c icns "${ICONSET}" -o "${APP}/Contents/Resources/${BIN_NAME}.icns"
 
 echo "==> ad-hoc 代码签名（本地使用，TCC 权限需要稳定签名）"
 codesign --force --sign - "${APP}"
@@ -100,7 +101,7 @@ if [[ "${1:-}" == "--install" ]]; then
   echo "==> 安装到 /Applications"
   rm -rf "/Applications/${APP_NAME}.app"
   cp -R "${APP}" "/Applications/${APP_NAME}.app"
-  echo "✓ 已安装 /Applications/${APP_NAME}.app（Spotlight 搜索 KeyBeam 或 Launchpad 启动）"
+  echo "✓ 已安装 /Applications/${APP_NAME}.app（Spotlight 搜索 ClipBeam 或 Launchpad 启动）"
 else
   cat <<TIP
 
@@ -109,6 +110,6 @@ else
   cp -R "${APP}" /Applications/   # 可选：安装到应用程序目录
 
 首次启动请到「系统设置 → 隐私与安全性」授予：辅助功能、屏幕录制、通知，
-授权后重新启动 KeyBeam。
+授权后重新启动 ClipBeam。
 TIP
 fi

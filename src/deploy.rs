@@ -12,7 +12,7 @@ use crate::protocol::b32_encode_upper;
 use crate::typer::{TypeResult, Typer};
 
 /// 编译期内嵌接收页（单文件）。
-const PAGE: &str = include_str!("../web/keybeam.html");
+const PAGE: &str = include_str!("../web/clipbeam.html");
 
 /// 自解压模板。约束：
 /// - 全 ASCII（enigo Unicode 逐字符输入，避免任何多字节字符）；
@@ -20,7 +20,7 @@ const PAGE: &str = include_str!("../web/keybeam.html");
 /// - 载荷仅 `[A-Z2-7]`，放在双引号 JS 字符串中无需转义；
 /// - 除结尾的 `</script>` 外不得出现该序列（载荷 base32 不可能包含）。
 const TEMPLATE: &str = concat!(
-    r#"<!doctype html><meta charset="utf-8"><title>KeyBeam</title><body style="font:14px sans-serif;padding:24px">KeyBeam bootstrap. If this page does not reload automatically, save this text as a .html file (UTF-8) and open it again.<script>var D=""#,
+    r#"<!doctype html><meta charset="utf-8"><title>ClipBeam</title><body style="font:14px sans-serif;padding:24px">ClipBeam bootstrap. If this page does not reload automatically, save this text as a .html file (UTF-8) and open it again.<script>var D=""#,
     "__PAYLOAD__",
     r#"";var A="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";var v=0,b=0,o=[];for(var i=0;i<D.length;i++){v=(v<<5)|A.indexOf(D.charAt(i));b+=5;if(b>=8){b-=8;o.push((v>>>b)&255);}}var t=new TextDecoder().decode(new Uint8Array(o));document.open();document.write(t);document.close();</script>"#
 );

@@ -103,9 +103,9 @@ impl Config {
         std::time::Duration::from_secs(self.receive_timeout_s)
     }
 
-    /// 配置文件路径：config_dir/KeyBeam/config.json。
+    /// 配置文件路径：config_dir/ClipBeam/config.json。
     pub fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("KeyBeam").join("config.json"))
+        dirs::config_dir().map(|d| d.join("ClipBeam").join("config.json"))
     }
 
     /// 读取配置；文件缺失或损坏时静默回退默认值。
@@ -121,8 +121,9 @@ impl Config {
 
     /// 保存配置（自动创建目录）。
     pub fn save(&self) -> std::io::Result<()> {
-        let path = Self::config_path()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "找不到系统配置目录"))?;
+        let path = Self::config_path().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "找不到系统配置目录")
+        })?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }

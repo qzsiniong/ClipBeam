@@ -12,7 +12,7 @@ pub const M_SETTINGS: &str = "settings";
 pub const M_QUIT: &str = "quit";
 
 /// 64x64 RGBA（build.rs 生成）。
-const ICON_RGBA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/keybeam_icon.rgba"));
+const ICON_RGBA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/clipbeam_icon.rgba"));
 
 fn load_icon() -> Result<Icon, String> {
     Icon::from_rgba(ICON_RGBA.to_vec(), 64, 64).map_err(|e| format!("托盘图标创建失败: {e}"))
@@ -46,12 +46,20 @@ pub fn build() -> Result<TrayMenu, String> {
     let status_item = MenuItem::with_id(M_STATUS, "状态：空闲", false, None);
     let send_item = MenuItem::with_id(M_SEND, "发送本机剪贴板 → 远程（热键）", true, None);
     let recv_item = MenuItem::with_id(M_RECV, "截屏接收远程二维码（热键）", true, None);
-    let deploy_type_item =
-        MenuItem::with_id(M_DEPLOY_TYPE, "部署接收页到远程（键盘输入，约 3 分钟）", true, None);
-    let deploy_copy_item =
-        MenuItem::with_id(M_DEPLOY_COPY, "部署接收页（复制到宿主机剪贴板）", true, None);
+    let deploy_type_item = MenuItem::with_id(
+        M_DEPLOY_TYPE,
+        "部署接收页到远程（键盘输入，约 3 分钟）",
+        true,
+        None,
+    );
+    let deploy_copy_item = MenuItem::with_id(
+        M_DEPLOY_COPY,
+        "部署接收页（复制到宿主机剪贴板）",
+        true,
+        None,
+    );
     let settings_item = MenuItem::with_id(M_SETTINGS, "设置…", true, None);
-    let quit_item = MenuItem::with_id(M_QUIT, "退出 KeyBeam", true, None);
+    let quit_item = MenuItem::with_id(M_QUIT, "退出 ClipBeam", true, None);
 
     let menu = Menu::with_items(&[
         &status_item,
@@ -69,7 +77,7 @@ pub fn build() -> Result<TrayMenu, String> {
     .map_err(|e| format!("托盘菜单创建失败: {e}"))?;
 
     let tray = TrayIconBuilder::new()
-        .with_tooltip("KeyBeam 剪贴板桥接")
+        .with_tooltip("ClipBeam 剪贴板桥接")
         .with_icon(load_icon()?)
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(true)

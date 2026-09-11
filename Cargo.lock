@@ -759,6 +759,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "clipbeam"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "clap",
+ "core-graphics 0.24.0",
+ "data-encoding",
+ "dirs 5.0.1",
+ "egui",
+ "egui-winit",
+ "egui_glow",
+ "enigo",
+ "global-hotkey",
+ "glutin",
+ "glutin-winit",
+ "image",
+ "mac-notification-sys",
+ "png",
+ "raw-window-handle",
+ "rqrr",
+ "serde",
+ "serde_json",
+ "tray-icon",
+ "winit",
+ "winrt-notification",
+ "xcap",
+]
+
+[[package]]
 name = "clipboard-win"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2257,35 +2286,6 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "keybeam"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "clap",
- "core-graphics 0.24.0",
- "data-encoding",
- "dirs 5.0.1",
- "egui",
- "egui-winit",
- "egui_glow",
- "enigo",
- "global-hotkey",
- "glutin",
- "glutin-winit",
- "image",
- "mac-notification-sys",
- "png",
- "raw-window-handle",
- "rqrr",
- "serde",
- "serde_json",
- "tray-icon",
- "winit",
- "winrt-notification",
- "xcap",
 ]
 
 [[package]]

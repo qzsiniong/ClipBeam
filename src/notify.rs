@@ -12,14 +12,14 @@ pub fn notify(title: &str, body: &str) {
             // 无 bundle 的裸二进制会让 mac-notification-sys 用 AppleScript 查找
             // 名为 "use_default" 的应用，找不到时弹出 "Choose Application" 对话框。
             // 该库的 set_application 内部是 call_once，失败后不可再改，因此必须
-            // 一次选对：在 .app 包内运行 → 自身 bundle id（通知归属 KeyBeam，
+            // 一次选对：在 .app 包内运行 → 自身 bundle id（通知归属 ClipBeam，
             // 打包后 LaunchServices 可查到）；裸跑（cargo run / 联调）→ 一定
             // 存在的 com.apple.finder。
             let in_app_bundle = std::env::current_exe().map_or(false, |p| {
                 p.to_string_lossy().contains(".app/Contents/MacOS/")
             });
             let ident = if in_app_bundle {
-                "com.keybeam.app"
+                "com.clipbeam.app"
             } else {
                 "com.apple.finder"
             };

@@ -6,9 +6,9 @@
 use data_encoding::BASE32_NOPAD;
 
 /// 键盘帧魔术头（含协议版本）。
-pub const KB_MAGIC: &str = "keybeam1";
-/// 二维码帧魔术前缀（KeyBeam v1）。
-pub const QR_MAGIC: &str = "KB1";
+pub const CLIP_MAGIC: &str = "clipbeam1";
+/// 二维码帧魔术前缀（ClipBeam v1）。
+pub const QR_MAGIC: &str = "CB1";
 /// 键盘帧：起始 / 字段分隔（数字行 0，免 Shift）。
 pub const FIELD_SEP: char = '0';
 /// 键盘帧：整帧结束（数字行 1，免 Shift）。
@@ -89,11 +89,11 @@ pub fn crc_b32(crc: u32) -> String {
 // 协议 A：键盘帧
 // ---------------------------------------------------------------------------
 
-/// 构造键盘帧：`0 keybeam1 0 <payload> 0 <digest> 1`（无空格）。
+/// 构造键盘帧：`0 clipbeam1 0 <payload> 0 <digest> 1`（无空格）。
 pub fn build_keyboard_frame(text: &str) -> String {
     let payload = b32_encode_lower(text.as_bytes());
     let digest = crc_b32(crc32(payload.as_bytes()));
-    format!("{FIELD_SEP}{KB_MAGIC}{FIELD_SEP}{payload}{FIELD_SEP}{digest}{FRAME_END}")
+    format!("{FIELD_SEP}{CLIP_MAGIC}{FIELD_SEP}{payload}{FIELD_SEP}{digest}{FRAME_END}")
 }
 
 // ---------------------------------------------------------------------------
@@ -187,10 +187,10 @@ mod tests {
             assert_eq!(String::from_utf8(dec).unwrap(), text);
         }
         // 大写输入也应能解码
-        let upper = b32_encode_upper("KeyBeam".as_bytes());
+        let upper = b32_encode_upper("ClipBeam".as_bytes());
         assert_eq!(
             String::from_utf8(b32_decode(&upper).unwrap()).unwrap(),
-            "KeyBeam"
+            "ClipBeam"
         );
     }
 
@@ -202,14 +202,14 @@ mod tests {
 
     #[test]
     fn keyboard_frame_roundtrip() {
-        let frame = build_keyboard_frame("你好，KeyBeam 123");
+        let frame = build_keyboard_frame("你好，ClipBeam 123");
         assert!(frame.starts_with(FIELD_SEP));
         assert!(frame.ends_with(FRAME_END));
         // 解析各字段：0 magic 0 payload 0 digest 1
         let fields: Vec<&str> = frame.split(FIELD_SEP).collect();
         assert_eq!(fields.len(), 4);
         assert_eq!(fields[0], "");
-        assert_eq!(fields[1], KB_MAGIC);
+        assert_eq!(fields[1], CLIP_MAGIC);
         assert!(fields[2]
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
@@ -223,7 +223,7 @@ mod tests {
         let digest_field = fields[3].trim_end_matches(FRAME_END);
         assert_eq!(digest_field, crc_b32(crc32(payload.as_bytes())));
         let decoded = b32_decode(payload).unwrap();
-        assert_eq!(String::from_utf8(decoded).unwrap(), "你好，KeyBeam 123");
+        assert_eq!(String::from_utf8(decoded).unwrap(), "你好，ClipBeam 123");
     }
 
     #[test]
@@ -244,10 +244,10 @@ mod tests {
     #[test]
     fn qr_frame_rejects_garbage() {
         assert!(parse_qr_frame("https://example.com").is_none());
-        assert!(parse_qr_frame("KB1.0.0.aaaaaaa.x").is_none()); // total=0
-        assert!(parse_qr_frame("KB1.2.5.aaaaaaa.x").is_none()); // index>=total
-        assert!(parse_qr_frame("KB1.2.0.short.x").is_none()); // digest 长度错
-        assert!(parse_qr_frame("KB1.2.0.aaaaaaa.A!B").is_none()); // 非法字符
+        assert!(parse_qr_frame("CB1.0.0.aaaaaaa.x").is_none()); // total=0
+        assert!(parse_qr_frame("CB1.2.5.aaaaaaa.x").is_none()); // index>=total
+        assert!(parse_qr_frame("CB1.2.0.short.x").is_none()); // digest 长度错
+        assert!(parse_qr_frame("CB1.2.0.aaaaaaa.A!B").is_none()); // 非法字符
     }
 
     #[test]

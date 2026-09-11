@@ -1,4 +1,4 @@
-// KeyBeam Clipboard：宿主机 ↔ 远程浏览器剪贴板书桥（键盘通道 + 二维码光通道）。
+// ClipBeam：宿主机 ↔ 远程浏览器剪贴板桥（键盘通道 + 二维码光通道）。
 // 常驻系统托盘程序；send-once / recv-once / deploy-* 为联调用的一次性子命令。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -31,7 +31,7 @@ const ID_RECV: u32 = 2;
 const ID_STOP: u32 = 3;
 
 #[derive(Parser)]
-#[command(name = "keybeam", about = "宿主机 ↔ 远程浏览器剪贴板书桥")]
+#[command(name = "clipbeam", about = "宿主机 ↔ 远程浏览器剪贴板桥")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -155,7 +155,7 @@ impl App {
                 if self.hk.register(h).is_ok() {
                     self.registered.push(h);
                 } else {
-                    notify::notify("KeyBeam 热键注册失败", spec);
+                    notify::notify("ClipBeam 热键注册失败", spec);
                 }
             }
         }
@@ -236,11 +236,11 @@ impl App {
                 Ok(()) => {
                     let (chars, _) = deploy::sizes();
                     notify::notify(
-                        "KeyBeam",
+                        "ClipBeam",
                         &format!("自解压接收页（{chars} 字符）已复制到宿主机剪贴板"),
                     );
                 }
-                Err(e) => notify::notify("KeyBeam 部署失败", &e),
+                Err(e) => notify::notify("ClipBeam 部署失败", &e),
             },
             tray::M_SETTINGS => {
                 if self.settings.is_none() {
@@ -249,7 +249,7 @@ impl App {
                             w.request_redraw();
                             self.settings = Some(w);
                         }
-                        Err(e) => notify::notify("KeyBeam 无法打开设置", &e),
+                        Err(e) => notify::notify("ClipBeam 无法打开设置", &e),
                     }
                 } else if let Some(w) = &self.settings {
                     w.focus();
@@ -310,7 +310,7 @@ fn run_worker(
         TaskKind::DeployType => match deploy::type_bootstrap(&cfg, &token, true) {
             typer::TypeResult::Completed(n) => TaskOutcome {
                 title: "✓ 接收页引导包已输入".into(),
-                body: format!("{n} 字符；请把记事本内容另存为 keybeam.html 后打开"),
+                body: format!("{n} 字符；请把记事本内容另存为 clipbeam.html 后打开"),
             },
             typer::TypeResult::Cancelled(n) => TaskOutcome {
                 title: "部署已中止".into(),
@@ -360,11 +360,11 @@ impl TrayState {
         if let Some(outcome) = self.app.settings.as_mut().and_then(|w| w.take_outcome()) {
             if let SettingsOutcome::Saved(new_cfg) = outcome {
                 if let Err(e) = new_cfg.save() {
-                    notify::notify("KeyBeam 配置保存失败", &e.to_string());
+                    notify::notify("ClipBeam 配置保存失败", &e.to_string());
                 }
                 self.app.cfg = new_cfg;
                 self.app.apply_hotkeys();
-                notify::notify("KeyBeam", "设置已保存，热键已重注册");
+                notify::notify("ClipBeam", "设置已保存，热键已重注册");
             }
             // drop SettingsWindow（关闭 GL 表面与窗口）
             self.app.settings = None;
@@ -516,7 +516,7 @@ fn main() {
             );
             match deploy::type_bootstrap(&cfg, &token, true) {
                 typer::TypeResult::Completed(n) => {
-                    eprintln!("✓ 引导包输入完成（{n} 字符）。请在远程把记事本内容另存为 keybeam.html（编码 UTF-8），双击打开即可。")
+                    eprintln!("✓ 引导包输入完成（{n} 字符）。请在远程把记事本内容另存为 clipbeam.html（编码 UTF-8），双击打开即可。")
                 }
                 typer::TypeResult::Cancelled(n) => {
                     eprintln!("✗ 已中止：约 {n} 字符可能已落入记事本，请清空后重试")

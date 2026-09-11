@@ -1,5 +1,5 @@
 //! E2E（离线部分）：解码 qrcode-generator 生成的二维码 GIF 帧 → 组包 → CRC 校验 → 还原文本。
-//! 用法：cargo run --example qr_e2e -- /tmp/kbqr/*.gif
+//! 用法：cargo run --example qr_e2e -- /tmp/cbqr/*.gif
 //! 参数顺序任意（模拟截屏时帧乱序出现）。
 #![allow(dead_code)]
 #[path = "../src/protocol.rs"]
@@ -36,8 +36,12 @@ fn main() -> ExitCode {
         let mut prepared = PreparedImage::prepare(gray);
         let grids = prepared.detect_grids();
         for grid in grids {
-            let Ok((_, content)) = grid.decode() else { continue };
-            let Some(f) = parse_qr_frame(&content) else { continue };
+            let Ok((_, content)) = grid.decode() else {
+                continue;
+            };
+            let Some(f) = parse_qr_frame(&content) else {
+                continue;
+            };
             decoded_frames += 1;
             match &mut batch {
                 Some((crc, total, map)) if *crc == f.crc && *total == f.total => {
@@ -53,7 +57,7 @@ fn main() -> ExitCode {
     }
 
     let Some((crc, total, map)) = batch else {
-        eprintln!("没有解码出任何 KeyBeam 帧");
+        eprintln!("没有解码出任何 ClipBeam 帧");
         return ExitCode::FAILURE;
     };
     println!("解码 {decoded_frames} 帧，批次 {}/{}", map.len(), total);

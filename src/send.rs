@@ -7,7 +7,10 @@ use crate::typer::{TypeResult, Typer};
 #[derive(Debug)]
 pub enum SendReport {
     /// 发送完成（帧字符数，原始文本字节数）。
-    Done { frame_chars: usize, text_bytes: usize },
+    Done {
+        frame_chars: usize,
+        text_bytes: usize,
+    },
     /// 用户中止（已发出字符数）。
     Cancelled { sent: usize },
     /// 无法发送（原因）。
@@ -28,7 +31,7 @@ pub fn run_once(cfg: &Config, cancel: &CancellationToken, settle: bool) -> SendR
         Ok(t) => t,
         Err(_) => {
             return SendReport::Error(
-                "剪贴板内容不是文本（KeyBeam v1 仅支持文本，图片/富文本请先转成文本）".into(),
+                "剪贴板内容不是文本（ClipBeam v1 仅支持文本，图片/富文本请先转成文本）".into(),
             )
         }
     };

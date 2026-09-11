@@ -2,7 +2,7 @@
 //! 1) 代码生成图标（深色圆角底 + 白色 K 光束 + 青色光点），免二进制资产入库：
 //!    - 64x64 RGBA（托盘/窗口，include_bytes! 内嵌）
 //!    - 1024x1024 PNG（macOS .app 打包时 iconutil 生成 .icns）
-//! 2) web/keybeam.html 变化时触发重编译（deploy.rs 用 include_str! 内嵌）。
+//! 2) web/clipbeam.html 变化时触发重编译（deploy.rs 用 include_str! 内嵌）。
 
 use std::path::PathBuf;
 
@@ -47,13 +47,7 @@ fn render(scale: i32) -> Vec<u8> {
     }
 
     // 粗线（沿 Bresenham 路径盖圆盘），坐标与粗细均按 scale 放大
-    let line = |buf: &mut [u8],
-                x0: i32,
-                y0: i32,
-                x1: i32,
-                y1: i32,
-                t: i32,
-                c: Rgba| {
+    let line = |buf: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, t: i32, c: Rgba| {
         let (x0, y0, x1, y1, t) = (x0 * scale, y0 * scale, x1 * scale, y1 * scale, t * scale);
         let mut plot = |x: i32, y: i32| {
             let r2 = t * t;
@@ -99,14 +93,14 @@ fn render(scale: i32) -> Vec<u8> {
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed=web/keybeam.html");
+    println!("cargo:rerun-if-changed=web/clipbeam.html");
     println!("cargo:rerun-if-changed=build.rs");
 
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     // 托盘/窗口图标：64x64 RGBA
     let rgba64 = render(1);
-    std::fs::write(out.join("keybeam_icon.rgba"), &rgba64).unwrap();
+    std::fs::write(out.join("clipbeam_icon.rgba"), &rgba64).unwrap();
 
     // 高分 PNG（打包脚本用 sips/iconutil 生成 .icns）
     let png1024 = render(16);
@@ -120,5 +114,5 @@ fn main() {
         let mut writer = enc.write_header().unwrap();
         writer.write_image_data(&png1024).unwrap();
     }
-    std::fs::write(out.join("keybeam_icon_1024.png"), &png_bytes).unwrap();
+    std::fs::write(out.join("clipbeam_icon_1024.png"), &png_bytes).unwrap();
 }

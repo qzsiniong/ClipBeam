@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>KeyBeam 剪贴板桥接</title>
+  <title>ClipBeam 剪贴板桥接</title>
   <style>
     :root {
       --bg: #0f1320;
@@ -233,7 +233,7 @@
 
 <body>
   <div class="wrap">
-    <h1>KeyBeam 剪贴板桥接</h1>
+    <h1>ClipBeam 剪贴板桥接</h1>
     <div class="sub">宿主机 ↔ 远程浏览器 · 无网络通道 · 键盘 / 二维码。接收前请<b>点击本页空白处</b>让焦点落在页面上；键盘通道要求远程会话为 <span class="badge">US/QWERTY
         布局</span></div>
 
@@ -264,7 +264,7 @@
       </div>
       <div class="status" id="outStatus">未生成</div>
       <div class="qr" id="qrBox">
-        <div class="qr-card"><img alt="KeyBeam 二维码"></div>
+        <div class="qr-card"><img alt="ClipBeam 二维码"></div>
         <div class="qr-tip" id="qrTip">点击任意处关闭</div>
       </div>
     </div>
@@ -319,9 +319,9 @@
     var enc = new TextEncoder(), dec = new TextDecoder();
 
     /* ================= ① 入站：键盘状态机 =================
-       帧: 0 keybeam1 0 <payload> 0 <digest> 1
+       帧: 0 clipbeam1 0 <payload> 0 <digest> 1
        状态 idle → magic → payload → digest                       */
-    var MAGIC = "keybeam1", IDLE_TIMEOUT = 10000;
+    var MAGIC = "clipbeam1", IDLE_TIMEOUT = 10000;
     var kbState = "idle", magicBuf = "", payloadBuf = "", digestBuf = "", lastEvt = 0;
     var pauseChk = $("pauseChk"), inStatus = $("inStatus"), inBar = $("inBar"),
       manualCopy = $("manualCopy"), manualRow = $("manualRow");
@@ -417,7 +417,7 @@
       var size = clamp(chunkIn.value, 200, 1500);
       var list = [];
       for (var i = 0; i < payload.length; i += size)list.push(payload.slice(i, i + size));
-      frames = list.map(function (ch, i) { return "KB1." + list.length + "." + i + "." + digest + "." + ch; });
+      frames = list.map(function (ch, i) { return "CB1." + list.length + "." + i + "." + digest + "." + ch; });
       return list.length;
     }
     function renderFrame() {

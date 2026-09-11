@@ -1,15 +1,15 @@
-# KeyBeam Clipboard
+# ClipBeam
 
 宿主机 ↔ 无网络远程环境之间的**剪贴板桥接工具**。
 
 典型场景：通过 VDI / 远程桌面 / 云桌面浏览器访问一台与外网隔离的机器，
-无法使用剪贴板同步、无法传输文件。KeyBeam 利用两条"天然存在"的通道：
+无法使用剪贴板同步、无法传输文件。ClipBeam 利用两条"天然存在"的通道：
 
 - **键盘通道**（宿主机 → 远程）：本机模拟逐字符按键，远程网页接收；
 - **光通道**（远程 → 宿主机）：远程网页循环播放二维码，本机截屏解码。
 
 远程侧只需要一个**单文件、零依赖、可断网 `file://` 打开**的网页
-（[web/keybeam.html](web/keybeam.html)），无需安装任何软件。
+（[web/clipbeam.html](web/clipbeam.html)），无需安装任何软件。
 
 ---
 
@@ -58,8 +58,8 @@ flowchart LR
 
 | 通道 | 方向 | 介质 | 帧格式 |
 |---|---|---|---|
-| **A** | 宿主机 → 远程 | 键盘逐字符 | `0keybeam10<小写base32>0<7字符CRC摘要>1` |
-| **B** | 远程 → 宿主机 | 二维码截屏 | `KB1.总帧数.序号.7字符CRC摘要.大写base32块` |
+| **A** | 宿主机 → 远程 | 键盘逐字符 | `0clipbeam10<小写base32>0<7字符CRC摘要>1` |
+| **B** | 远程 → 宿主机 | 二维码截屏 | `CB1.总帧数.序号.7字符CRC摘要.大写base32块` |
 | **C** | 宿主机 → 远程 | 键盘（一次性引导） | 全 ASCII 单行「自解压 HTML」，打开后还原完整接收页 |
 
 两条数据通道统一使用：
@@ -75,7 +75,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant U as 用户
-    participant App as KeyBeam（宿主机）
+    participant App as ClipBeam（宿主机）
     participant Page as 接收页（远程浏览器）
 
     U->>App: 复制文本后，焦点切到远程页面，按发送热键
@@ -97,7 +97,7 @@ sequenceDiagram
 sequenceDiagram
     participant U as 用户
     participant Page as 接收页（远程浏览器）
-    participant App as KeyBeam（宿主机）
+    participant App as ClipBeam（宿主机）
 
     U->>Page: 点"读取远程剪贴板并生成二维码"
     Page->>Page: readText → UTF-8 → 大写 base32 → 分块
@@ -138,12 +138,12 @@ stateDiagram-v2
 ### 1. 构建并启动
 
 ```bash
-# macOS（推荐）：打包成可双击的 KeyBeam.app
-scripts/package-macos.sh --install     # 安装到 /Applications，Spotlight 搜 KeyBeam 启动
+# macOS（推荐）：打包成可双击的 ClipBeam.app
+scripts/package-macos.sh --install     # 安装到 /Applications，Spotlight 搜 ClipBeam 启动
 
 # 或直接运行裸二进制（联调用，会带一个终端窗口）
 cargo build --release
-./target/release/keybeam          # 无参数 = 常驻系统托盘（macOS 不显示 Dock 图标）
+./target/release/clipbeam          # 无参数 = 常驻系统托盘（macOS 不显示 Dock 图标）
 ```
 
 ### 2. 授予权限（仅 macOS）
@@ -162,10 +162,10 @@ cargo build --release
 
 1. **键盘部署（无任何通道时）**：远程打开记事本并聚焦 → 托盘菜单选
    **「部署接收页到远程（键盘输入，约 3 分钟）」** → 等待逐字符敲完 →
-   把记事本内容另存为 `keybeam.html`（UTF-8 编码）→ 浏览器打开；
+   把记事本内容另存为 `clipbeam.html`（UTF-8 编码）→ 浏览器打开；
 2. **剪贴板部署（远程桌面自带剪贴板同步时）**：托盘选
    **「部署接收页（复制到宿主机剪贴板）」** → 在远程粘贴保存为 `.html`；
-3. 直接把仓库里的 [web/keybeam.html](web/keybeam.html) 通过任意可用方式传过去。
+3. 直接把仓库里的 [web/clipbeam.html](web/clipbeam.html) 通过任意可用方式传过去。
 
 ### 4. 双向使用
 
@@ -183,7 +183,7 @@ cargo build --release
 ### 发送（宿主机 → 远程）
 
 1. 在宿主机复制任意文本（限纯文本，默认上限 256 KB）；
-2. 把焦点切到远程浏览器的 KeyBeam 页面（点击页面任意位置）；
+2. 把焦点切到远程浏览器的 ClipBeam 页面（点击页面任意位置）；
 3. 按发送热键，或托盘菜单选「发送本机剪贴板 → 远程」；
 4. 程序等待 200ms 让修饰键抬起，然后逐键敲入协议帧，页面收到后自动：
    校验 CRC → base32 解码 → 写入远程剪贴板 → 页面提示成功。
@@ -226,7 +226,7 @@ cargo build --release
 | 部署接收页到远程（键盘输入，约 3 分钟） | 协议 C，逐键敲自解压引导页 |
 | 部署接收页（复制到宿主机剪贴板） | 协议 C，走远程桌面自带剪贴板 |
 | 设置… | 打开设置窗口 |
-| 退出 KeyBeam | 退出常驻程序 |
+| 退出 ClipBeam | 退出常驻程序 |
 
 任务运行期间，三个执行类菜单项自动禁用。
 
@@ -250,9 +250,9 @@ cargo build --release
 
 配置文件位置（JSON，可手工编辑；缺字段自动回退默认值）：
 
-- macOS：`~/Library/Application Support/KeyBeam/config.json`
-- Windows：`%APPDATA%\KeyBeam\config.json`
-- Linux：`~/.config/KeyBeam/config.json`
+- macOS：`~/Library/Application Support/ClipBeam/config.json`
+- Windows：`%APPDATA%\ClipBeam\config.json`
+- Linux：`~/.config/ClipBeam/config.json`
 
 ---
 
@@ -261,10 +261,10 @@ cargo build --release
 不带参数启动为托盘常驻模式；以下子命令主要用于联调/脚本化：
 
 ```bash
-keybeam send-once      # 立即发送一次本机剪贴板（0.2s 后开始，Ctrl-C 强杀）
-keybeam recv-once      # 立即截屏接收，stderr 打印 got/total 进度
-keybeam deploy-type   # 逐键敲入自解压接收页到当前焦点窗口（先切到远程记事本）
-keybeam deploy-copy   # 把自解压接收页复制到宿主机剪贴板
+clipbeam send-once      # 立即发送一次本机剪贴板（0.2s 后开始，Ctrl-C 强杀）
+clipbeam recv-once      # 立即截屏接收，stderr 打印 got/total 进度
+clipbeam deploy-type   # 逐键敲入自解压接收页到当前焦点窗口（先切到远程记事本）
+clipbeam deploy-copy   # 把自解压接收页复制到宿主机剪贴板
 ```
 
 ---
@@ -287,14 +287,14 @@ cargo build --release
 标准应用包，启动无终端、不占 Dock（仅菜单栏图标），与普通 Mac 应用一致：
 
 ```bash
-scripts/package-macos.sh              # 生成 target/release/bundle/KeyBeam.app
+scripts/package-macos.sh              # 生成 target/release/bundle/ClipBeam.app
 scripts/package-macos.sh --install    # 额外安装到 /Applications（Spotlight/Launchpad 可启动）
 ```
 
 脚本自动完成：`cargo build --release` → 组装 `Contents/` 与 `Info.plist`
-（`LSUIElement=1` 纯菜单栏应用，bundle id `com.keybeam.app`）→ 由 build.rs
+（`LSUIElement=1` 纯菜单栏应用，bundle id `com.clipbeam.app`）→ 由 build.rs
 生成的 1024px 图标经 sips/iconutil 合成 `.icns` → ad-hoc 代码签名 →
-LaunchServices 注册。之后在 Finder 双击或 `open KeyBeam.app` 即可启动，
+LaunchServices 注册。之后在 Finder 双击或 `open ClipBeam.app` 即可启动，
 程序由 launchd 托管，关闭终端/SSH 断开都不影响运行。
 
 > 首次启动需在「系统设置 → 隐私与安全性」授予辅助功能、屏幕录制、通知权限；
@@ -332,20 +332,20 @@ cargo run --example qr_e2e   # JS(qrcode-generator) 产出帧 → Rust(rqrr) 解
 ### 协议 A：键盘帧
 
 ```
-0 keybeam1 0 <payload> 0 <digest> 1
+0 clipbeam1 0 <payload> 0 <digest> 1
 ```
 
-- `keybeam1` 为魔术头（`1` 是协议版本）；
+- `clipbeam1` 为魔术头（`1` 是协议版本）；
 - `0` 为字段分隔、末尾 `1` 为整帧结束，均为数字行键，无需 Shift；
 - `payload`：文本 UTF-8 字节的小写无填充 base32；
 - `digest`：`CRC32(payload 字节)` 的 4 字节大端再小写 base32（7 字符）；
-- 接收页以严格前缀 `0keybeam10` 识别帧起始（不能用字符集匹配，
+- 接收页以严格前缀 `0clipbeam10` 识别帧起始（不能用字符集匹配，
   因为魔术头本身含数字 `1`）；半截帧 10 秒无后续自动复位。
 
 ### 协议 B：二维码帧
 
 ```
-KB1.<total>.<index>.<digest>.<data>
+CB1.<total>.<index>.<digest>.<data>
 ```
 
 - `total`：本批总帧数（≥1）；`index`：当前帧序号（0 起，`< total`）；
@@ -359,7 +359,7 @@ KB1.<total>.<index>.<digest>.<data>
 - 模板为全 ASCII、单行 HTML/JS，载荷仅 `[A-Z2-7]`，可安全放入双引号 JS 字符串；
 - 载荷 = 完整接收页 UTF-8 的大写无填充 base32（编译期 `include_str!` 内嵌）；
 - 远程浏览器打开引导页后，内联脚本做 base32 解码并 `document.write` 替换自身，
-  得到与 [web/keybeam.html](web/keybeam.html) 完全一致的接收页。
+  得到与 [web/clipbeam.html](web/clipbeam.html) 完全一致的接收页。
 
 ---
 
