@@ -2277,6 +2277,7 @@ dependencies = [
  "glutin-winit",
  "image",
  "mac-notification-sys",
+ "png",
  "raw-window-handle",
  "rqrr",
  "serde",

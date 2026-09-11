@@ -138,6 +138,10 @@ stateDiagram-v2
 ### 1. 构建并启动
 
 ```bash
+# macOS（推荐）：打包成可双击的 KeyBeam.app
+scripts/package-macos.sh --install     # 安装到 /Applications，Spotlight 搜 KeyBeam 启动
+
+# 或直接运行裸二进制（联调用，会带一个终端窗口）
 cargo build --release
 ./target/release/keybeam          # 无参数 = 常驻系统托盘（macOS 不显示 Dock 图标）
 ```
@@ -276,6 +280,25 @@ cargo build
 # Release（opt-level=2, strip）
 cargo build --release
 ```
+
+### macOS：打包成可双击的 .app（推荐）
+
+直接双击裸二进制会打开一个终端窗口，关掉终端程序即退出。用打包脚本生成
+标准应用包，启动无终端、不占 Dock（仅菜单栏图标），与普通 Mac 应用一致：
+
+```bash
+scripts/package-macos.sh              # 生成 target/release/bundle/KeyBeam.app
+scripts/package-macos.sh --install    # 额外安装到 /Applications（Spotlight/Launchpad 可启动）
+```
+
+脚本自动完成：`cargo build --release` → 组装 `Contents/` 与 `Info.plist`
+（`LSUIElement=1` 纯菜单栏应用，bundle id `com.keybeam.app`）→ 由 build.rs
+生成的 1024px 图标经 sips/iconutil 合成 `.icns` → ad-hoc 代码签名 →
+LaunchServices 注册。之后在 Finder 双击或 `open KeyBeam.app` 即可启动，
+程序由 launchd 托管，关闭终端/SSH 断开都不影响运行。
+
+> 首次启动需在「系统设置 → 隐私与安全性」授予辅助功能、屏幕录制、通知权限；
+> ad-hoc 签名的应用与之前裸二进制是不同身份，权限需要重新授权一次。
 
 平台依赖：
 
