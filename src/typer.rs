@@ -6,8 +6,11 @@
 //! enigo 的 `dispatch_assert_queue_fail` 崩溃）。
 //! 其他平台：使用 enigo。
 
+use enigo::{Direction, Key, Keyboard};
+
 use crate::cancel::CancellationToken;
 use crate::config::Config;
+use crate::keymap::{get_key_info, KeyAction};
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -23,19 +26,16 @@ pub enum TypeResult {
 pub struct Typer {
     delay: Duration,
     cancel: CancellationToken,
-    #[cfg(not(target_os = "macos"))]
     enigo: enigo::Enigo,
 }
 
 impl Typer {
     pub fn new(cfg: &Config, cancel: CancellationToken) -> Result<Self, String> {
-        #[cfg(not(target_os = "macos"))]
         let enigo = enigo::Enigo::new(&enigo::Settings::default())
             .map_err(|e| format!("无法初始化键盘模拟，请检查系统的辅助功能/输入监控权限: {e}"))?;
         Ok(Self {
             delay: cfg.key_delay(),
             cancel,
-            #[cfg(not(target_os = "macos"))]
             enigo,
         })
     }
@@ -54,33 +54,50 @@ impl Typer {
         true
     }
 
-    /// 发送单个字符的按键事件（按下+抬起）。
-    #[cfg(target_os = "macos")]
-    fn send_char(&self, c: char) -> Result<(), String> {
-        use core_graphics::event::{CGEvent, CGEventTapLocation};
-        use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-        // char → UTF-16（处理 BMP 外字符的代理对）
-        let mut buf = [0u16; 2];
-        let units = c.encode_utf16(&mut buf);
-        let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
-            .map_err(|_| "创建 CGEventSource 失败".to_string())?;
-        let key_down = CGEvent::new_keyboard_event(source.clone(), 0, true)
-            .map_err(|_| "创建 CGEvent 失败".to_string())?;
-        key_down.set_string_from_utf16_unchecked(units);
-        key_down.post(CGEventTapLocation::HID);
-        let key_up = CGEvent::new_keyboard_event(source, 0, false)
-            .map_err(|_| "创建 CGEvent 失败".to_string())?;
-        key_up.set_string_from_utf16_unchecked(units);
-        key_up.post(CGEventTapLocation::HID);
+    /// 模拟输入单个字符。
+    ///
+    /// 查 keymap 得基础字符与是否需 Shift；大写字母 / 特殊符号通过显式 Shift
+    /// press/release 实现。未知字符（如非 ASCII）回退 `text()` Unicode 输入。
+    pub fn send_char(&mut self, ch: char) -> Result<(), String> {
+        match get_key_info(ch) {
+            Some(KeyAction::Char {
+                #[allow(unused_variables)]
+                base,
+                shift,
+                #[allow(unused_variables)]
+                mac_keycode,
+            }) => {
+                if shift {
+                    let _ = self.enigo.key(Key::Shift, Direction::Press);
+                    // shift_settle();
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    // macOS 直接用 raw keycode，绕过 enigo 的 get_layoutdependent_keycode
+                    // （后者遍历不 break，小键盘 `.`keycode=65 覆盖主键盘 47，导致 `>`→`.`）
+                    let _ = self.enigo.raw(mac_keycode, Direction::Click);
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = self.enigo.key(Key::Unicode(base), Direction::Click);
+                }
+                if shift {
+                    let _ = self.enigo.key(Key::Shift, Direction::Release);
+                    // shift_settle();
+                }
+            }
+            Some(KeyAction::Return) => {
+                let _ = self.enigo.key(Key::Return, Direction::Click);
+            }
+            Some(KeyAction::Tab) => {
+                let _ = self.enigo.key(Key::Tab, Direction::Click);
+            }
+            None => {
+                // 非 ASCII / 未知字符：回退 Unicode 文本输入
+                let _ = self.enigo.text(&ch.to_string());
+            }
+        }
         Ok(())
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    fn send_char(&mut self, c: char) -> Result<(), String> {
-        use enigo::{Direction, Key, Keyboard};
-        self.enigo
-            .key(Key::Unicode(c), Direction::Click)
-            .map_err(|e| e.to_string())
     }
 
     /// 逐字符输入。开始前与每个字符前都检查取消令牌，

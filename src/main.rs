@@ -5,6 +5,7 @@
 mod cancel;
 mod config;
 mod deploy;
+mod keymap;
 mod notify;
 mod protocol;
 mod receive;
