@@ -12,7 +12,7 @@ use crate::protocol::b32_encode_upper;
 use crate::typer::{TypeResult, Typer};
 
 /// 编译期内嵌接收页（单文件）。
-const PAGE: &str = include_str!("../web/clipbeam.html");
+const PAGE: &str = include_str!("../../web/clipbeam.html");
 
 /// 自解压模板。约束：
 /// - 全 ASCII（enigo Unicode 逐字符输入，避免任何多字节字符）；

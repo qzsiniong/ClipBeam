@@ -271,14 +271,20 @@ clipbeam deploy-copy   # 把自解压接收页复制到宿主机剪贴板
 
 ## 构建
 
-要求 Rust stable（edition 2021）。
+要求 Rust stable（edition 2021）+ Node.js 18+ + pnpm。
+
+项目布局：`src-tauri/`（Rust crate + Tauri 配置）+ `frontend/`（Vue 3 + Vite + TS + shadcn-vue）。
+远程端 `web/clipbeam.html` 是独立单文件，不参与构建。
 
 ```bash
-# Debug
-cargo build
+# 安装前端依赖
+cd frontend && pnpm install && cd ..
 
-# Release（opt-level=2, strip）
-cargo build --release
+# Debug 开发模式（Tauri 自动启动 Vite dev server + Rust 编译 + 托盘应用）
+cd src-tauri && cargo tauri dev
+
+# Release 打包（Tauri 自动：前端构建 + Rust release + bundle）
+cd src-tauri && cargo tauri build
 ```
 
 ### macOS：打包成可双击的 .app（推荐）
@@ -287,15 +293,14 @@ cargo build --release
 标准应用包，启动无终端、不占 Dock（仅菜单栏图标），与普通 Mac 应用一致：
 
 ```bash
-scripts/package-macos.sh              # 生成 target/release/bundle/ClipBeam.app
+scripts/package-macos.sh              # 生成 src-tauri/target/release/bundle/macos/ClipBeam.app
 scripts/package-macos.sh --install    # 额外安装到 /Applications（Spotlight/Launchpad 可启动）
 ```
 
-脚本自动完成：`cargo build --release` → 组装 `Contents/` 与 `Info.plist`
-（`LSUIElement=1` 纯菜单栏应用，bundle id `com.clipbeam.app`）→ 由 build.rs
-生成的 1024px 图标经 sips/iconutil 合成 `.icns` → ad-hoc 代码签名 →
-LaunchServices 注册。之后在 Finder 双击或 `open ClipBeam.app` 即可启动，
-程序由 launchd 托管，关闭终端/SSH 断开都不影响运行。
+脚本自动完成：`pnpm install`（如需）→ `cargo tauri build`（Tauri 2 接管前端
+构建、Rust release 编译、`Contents/` 与 `Info.plist` 组装、`.icns` 生成）→
+ad-hoc 代码签名 → LaunchServices 注册。之后在 Finder 双击或 `open ClipBeam.app`
+即可启动，程序由 launchd 托管，关闭终端/SSH 断开都不影响运行。
 
 > 首次启动需在「系统设置 → 隐私与安全性」授予辅助功能、屏幕录制、通知权限；
 > ad-hoc 签名的应用与之前裸二进制是不同身份，权限需要重新授权一次。
@@ -310,16 +315,18 @@ LaunchServices 注册。之后在 Finder 双击或 `open ClipBeam.app` 即可启
 
 ```bash
 rustup target add x86_64-pc-windows-msvc
-cargo check --target x86_64-pc-windows-msvc
+cd src-tauri && cargo check --target x86_64-pc-windows-msvc
 ```
 
-托盘图标由 [build.rs](build.rs) 在编译期生成，无需额外资源文件。
+托盘图标由 [src-tauri/build.rs](src-tauri/build.rs) 在编译期代码生成（Bresenham K 字
+光束 + 青色光点），无需额外二进制资源入库。
 
 ---
 
 ## 测试
 
 ```bash
+cd src-tauri
 cargo test             # 14 个单元测试：base32/CRC32/帧解析/组包/自解压引导页等
 cargo clippy --all-targets
 cargo run --example qr_e2e   # JS(qrcode-generator) 产出帧 → Rust(rqrr) 解码的跨实现 E2E
@@ -382,10 +389,12 @@ CB1.<total>.<index>.<digest>.<data>
 
 | 层 | 依赖 |
 |---|---|
-| 托盘 / 热键 / 窗口 | tray-icon、global-hotkey、winit、egui/egui_glow/glutin |
+| 应用框架 | Tauri 2（tray-icon feature）、tauri-plugin-global-shortcut、tauri-plugin-clipboard-manager、tauri-plugin-notification |
+| 前端 | Vue 3 + Vite + TypeScript + Tailwind CSS v4 + shadcn-vue（reka-ui）+ Pinia + vue-router |
+| 异步运行时 | tokio（worker 任务用 spawn_blocking 执行同步业务调用） |
 | 键盘模拟 | CoreGraphics（macOS）、enigo（Windows/Linux） |
 | 剪贴板 | arboard |
 | 截屏 / 二维码 | xcap、rqrr、image |
 | 编码 / 配置 / CLI | data-encoding、serde/serde_json、dirs、clap |
 | 通知 | mac-notification-sys（macOS）、winrt-notification（Windows） |
-| 远程页 | 原生 JS 单文件，内联 qrcode-generator，零运行时依赖 |
+| 远程页 | 原生 JS 单文件，内联 qrcode-generator，零运行时依赖（不参与构建） |

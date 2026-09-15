@@ -1,0 +1,36 @@
+{
+  "name": "clipbeam-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2",
+    "@tauri-apps/plugin-global-shortcut": "^2",
+    "@tauri-apps/plugin-notification": "^2",
+    "@vueuse/core": "^11",
+    "class-variance-authority": "^0.7",
+    "clsx": "^2",
+    "lucide-vue-next": "^0.460",
+    "pinia": "^2",
+    "reka-ui": "^2",
+    "tailwind-merge": "^2",
+    "vue": "^3.5",
+    "vue-router": "^4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4",
+    "@types/node": "^22",
+    "@vitejs/plugin-vue": "^5",
+    "tailwindcss": "^4",
+    "typescript": "~5.6",
+    "vite": "^6",
+    "vue-tsc": "^2"
+  }
+}
