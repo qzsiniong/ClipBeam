@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import ModeToggle from './components/ModeToggle.vue'
 
 const router = useRouter()
 const currentPath = ref(router.currentRoute.value.path)
@@ -34,8 +35,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col">
-    <nav class="flex gap-2 px-4 py-3 border-b" v-if="currentPath !== '/'">
+  <div class="min-h-screen flex flex-col max-w-3xl mx-auto">
+    <nav class="flex gap-2 px-4 py-3 border-b">
       <a
         class="px-3 py-1.5 rounded hover:bg-[var(--accent)] cursor-pointer"
         :class="{ 'bg-[var(--primary)] text-white': currentPath === '/' }"
@@ -46,8 +47,10 @@ onMounted(async () => {
         :class="{ 'bg-[var(--primary)] text-white': currentPath === '/settings' }"
         @click="router.push('/settings')"
       >设置</a>
+
+      <ModeToggle />
     </nav>
-    <main class="flex-1">
+    <main class="flex-1 p-6">
       <router-view />
     </main>
   </div>

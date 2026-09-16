@@ -122,18 +122,21 @@ const statusText = computed(() => {
 })
 
 const statusVariant = computed(() => {
-  if (busy.value) return 'warning'
+  if (busy.value) return 'secondary'
   return 'success'
+})
+
+const progressWidth = computed(() => {
+  return total.value > 0 ? `${(got.value / total.value) * 100}%` : '0%'
 })
 </script>
 
 <template>
-  <div class="min-h-screen p-6">
-    <div class="max-w-2xl mx-auto space-y-4">
+    <div class="space-y-4">
       <div class="flex items-center justify-between">
         <div>
           <h1 class="text-2xl font-bold">ClipBeam</h1>
-          <p class="text-sm text-[var(--muted-foreground)]">宿主机 ↔ 远程剪贴板桥</p>
+          <p class="text-sm text-muted-foreground">宿主机 ↔ 远程剪贴板桥</p>
         </div>
         <Badge :variant="statusVariant">{{ statusText }}</Badge>
       </div>
@@ -144,22 +147,22 @@ const statusVariant = computed(() => {
           <CardDescription>点击下方按钮触发，或使用全局热键</CardDescription>
         </CardHeader>
         <CardContent>
-          <div v-if="lastOutcome" class="mb-4 p-3 rounded-lg bg-[var(--accent)]/10 border border-[var(--border)]">
+          <div v-if="lastOutcome" class="mb-4 p-3 rounded-lg bg-(--accent)/10 border border-border">
             <div class="font-medium">{{ lastOutcome.title }}</div>
-            <div class="text-sm text-[var(--muted-foreground)] mt-1">{{ lastOutcome.body }}</div>
+            <div class="text-sm text-muted-foreground mt-1">{{ lastOutcome.body }}</div>
           </div>
-          <div v-if="lastError" class="mb-4 p-3 rounded-lg bg-[var(--destructive)]/10 border border-[var(--destructive)]">
-            <div class="text-sm text-[var(--destructive)]">{{ lastError }}</div>
+          <div v-if="lastError" class="mb-4 p-3 rounded-lg bg-(--destructive)/10 border border-destructive">
+            <div class="text-sm text-destructive">{{ lastError }}</div>
           </div>
           <div v-if="busy && kind === 'recv'" class="space-y-1">
-            <div class="text-sm text-[var(--muted-foreground)]">接收进度</div>
-            <div class="w-full h-2 rounded-full bg-[var(--muted)] overflow-hidden">
+            <div class="text-sm text-muted-foreground">接收进度</div>
+            <div class="w-full h-2 rounded-full bg-muted overflow-hidden">
               <div
-                class="h-full bg-[var(--primary)] transition-all"
-                :style="{ width: total > 0 ? `${(got / total) * 100}%` : '0%' }"
+                class="h-full bg-primary transition-all"
+                :style="{ width: progressWidth }"
               />
             </div>
-            <div class="text-xs text-[var(--muted-foreground)]">{{ got }} / {{ total }} 帧</div>
+            <div class="text-xs text-muted-foreground">{{ got }} / {{ total }} 帧</div>
           </div>
         </CardContent>
         <CardFooter class="flex flex-wrap gap-2">
@@ -183,9 +186,8 @@ const statusVariant = computed(() => {
         </CardContent>
       </Card>
 
-      <div class="text-xs text-[var(--muted-foreground)] text-center pt-4">
-        远程端接收页请通过 <code class="px-1 py-0.5 rounded bg-[var(--muted)]">web/clipbeam.html</code> 部署
+      <div class="text-xs text-muted-foreground text-center pt-4">
+        远程端接收页请通过 <code class="px-1 py-0.5 rounded bg-muted">web/clipbeam.html</code> 部署
       </div>
     </div>
-  </div>
 </template>

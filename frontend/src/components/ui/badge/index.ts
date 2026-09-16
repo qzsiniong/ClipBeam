@@ -1,24 +1,29 @@
-import { cva, type VariantProps } from 'class-variance-authority'
+import type { VariantProps } from "class-variance-authority"
+import { cva } from "class-variance-authority"
 
-export { default as Badge } from './Badge.vue'
+export { default as Badge } from "./Badge.vue"
 
 export const badgeVariants = cva(
-  'inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)] focus:ring-offset-2',
+  "inline-flex items-center justify-center rounded-full border px-2 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive transition-[color,box-shadow] overflow-hidden",
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-[var(--primary)]/80',
-        secondary: 'border-transparent bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:bg-[var(--secondary)]/80',
-        destructive: 'border-transparent bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:bg-[var(--destructive)]/80',
-        outline: 'text-[var(--foreground)] border-[var(--border)]',
-        success: 'border-transparent bg-[var(--ok)] text-white hover:bg-[var(--ok)]/80',
-        warning: 'border-transparent bg-[var(--warn)] text-white hover:bg-[var(--warn)]/80',
+        default:
+          "border-transparent bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
+        secondary:
+          "border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
+        destructive:
+          "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
+        outline:
+          "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        success: 'border-transparent bg-success text-success-foreground hover:bg-success/80',
+        warning: 'border-transparent bg-warning text-warning-foreground hover:bg-warning/80',
+        error: 'border-transparent bg-error text-error-foreground hover:bg-error/80',
       },
     },
     defaultVariants: {
-      variant: 'default',
+      variant: "default",
     },
   },
 )
-
 export type BadgeVariants = VariantProps<typeof badgeVariants>

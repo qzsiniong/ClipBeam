@@ -55,14 +55,14 @@ function cancel() {
 </script>
 
 <template>
-  <div class="min-h-screen p-6">
-    <div class="max-w-2xl mx-auto">
+  <div>
+    <div class="">
       <div class="mb-6">
         <h1 class="text-2xl font-bold mb-1">ClipBeam 设置</h1>
-        <p class="text-sm text-[var(--muted-foreground)]">热键与传输参数配置</p>
+        <p class="text-sm text-muted-foreground">热键与传输参数配置</p>
       </div>
 
-      <div v-if="!draft" class="text-center py-12 text-[var(--muted-foreground)]">
+      <div v-if="!draft" class="text-center py-12 text-muted-foreground">
         加载中…
       </div>
 
