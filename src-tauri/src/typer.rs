@@ -40,6 +40,13 @@ impl Typer {
         })
     }
 
+    /// 等待指定延迟。
+    fn wait_delay(&self) {
+        if self.delay > Duration::ZERO {
+            std::thread::sleep(self.delay);
+        }
+    }
+
     /// 等待热键修饰键抬起；期间可被中止。返回 false 表示已被取消。
     pub fn wait_settle(cfg: &Config, cancel: &CancellationToken) -> bool {
         let step = Duration::from_millis(10);
@@ -69,7 +76,7 @@ impl Typer {
             }) => {
                 if shift {
                     let _ = self.enigo.key(Key::Shift, Direction::Press);
-                    // shift_settle();
+                    self.wait_delay();
                 }
                 #[cfg(target_os = "macos")]
                 {
@@ -82,8 +89,8 @@ impl Typer {
                     let _ = self.enigo.key(Key::Unicode(base), Direction::Click);
                 }
                 if shift {
+                    self.wait_delay();
                     let _ = self.enigo.key(Key::Shift, Direction::Release);
-                    // shift_settle();
                 }
             }
             Some(KeyAction::Return) => {
@@ -111,10 +118,8 @@ impl Typer {
             if let Err(e) = self.send_char(c) {
                 return TypeResult::Failed(i, format!("键盘事件发送失败: {e}"));
             }
-            // 最后一个字符不必再睡
-            if i + 1 < total && self.delay > Duration::ZERO {
-                std::thread::sleep(self.delay);
-            }
+
+            self.wait_delay();
         }
         TypeResult::Completed(total)
     }

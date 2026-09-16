@@ -26,6 +26,7 @@ pub fn b32_encode_lower(bytes: &[u8]) -> String {
 }
 
 /// 编码为大写无填充 base32（二维码 alphanumeric 模式使用）。
+#[allow(unused)]
 pub fn b32_encode_upper(bytes: &[u8]) -> String {
     BASE32_NOPAD.encode(bytes)
 }
