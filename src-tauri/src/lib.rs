@@ -142,7 +142,11 @@ pub fn run() {
         .on_tray_icon_event(|app, event| tray::on_tray_event(app, event))
         .on_menu_event(|app, event| {
             let id = event.id().as_ref().to_string();
-            let _ = app.emit("tray-menu", id);
+            if id == tray::M_QUIT {
+                app.exit(0);
+            } else {
+                let _ = app.emit("tray-menu", id);
+            }
         })
         .on_window_event(|window, event| {
             // 关闭按钮 → 隐藏到托盘(不退出)

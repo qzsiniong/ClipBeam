@@ -25,9 +25,6 @@ onMounted(async () => {
       await getCurrentWindow().setFocus()
       router.push('/settings')
     }
-    else if (id === 'quit') {
-      await getCurrentWindow().destroy()
-    }
     else if (id === 'send') {
       await invoke('start_send')
     }
