@@ -7,6 +7,8 @@ use data_encoding::BASE32_NOPAD;
 
 /// 键盘帧魔术头（含协议版本）。
 pub const CLIP_MAGIC: &str = "clipbeam1";
+/// 键盘帧魔术头（v2：zstd 压缩）。
+pub const CLIP_MAGIC_V2: &str = "clipbeam2";
 /// 二维码帧魔术前缀（ClipBeam v1）。
 pub const QR_MAGIC: &str = "CB1";
 /// 键盘帧：起始 / 字段分隔（数字行 0，免 Shift）。
@@ -95,6 +97,20 @@ pub fn build_keyboard_frame(text: &str) -> String {
     let payload = b32_encode_lower(text.as_bytes());
     let digest = crc_b32(crc32(payload.as_bytes()));
     format!("{FIELD_SEP}{CLIP_MAGIC}{FIELD_SEP}{payload}{FIELD_SEP}{digest}{FRAME_END}")
+}
+
+/// 构造 zstd 压缩键盘帧：`0 clipbeam2 0 <payload> 0 <digest> 1`。
+///
+/// 压缩等级 3；若压缩后反而更大（短文本常见），回退到 v1 未压缩帧。
+pub fn build_keyboard_frame_compressed(text: &str) -> String {
+    match zstd::encode_all(text.as_bytes(), 3) {
+        Ok(compressed) if compressed.len() < text.len() => {
+            let payload = b32_encode_lower(&compressed);
+            let digest = crc_b32(crc32(payload.as_bytes()));
+            format!("{FIELD_SEP}{CLIP_MAGIC_V2}{FIELD_SEP}{payload}{FIELD_SEP}{digest}{FRAME_END}")
+        }
+        _ => build_keyboard_frame(text),
+    }
 }
 
 // ---------------------------------------------------------------------------

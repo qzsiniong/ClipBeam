@@ -24,6 +24,7 @@ tauri-plugin-global-shortcut = "2"
 enigo = "0.6"
 arboard = "3"
 xcap = { version = "0.9", features = ["image"], default-features = false }
+zstd = "0.13"
 rqrr = "0.11"
 image = { version = "0.25", default-features = false, features = ["png"] }
 data-encoding = "2"

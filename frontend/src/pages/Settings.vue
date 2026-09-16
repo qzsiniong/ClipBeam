@@ -163,6 +163,18 @@ function cancel() {
                     />
                   </div>
                 </div>
+                <Separator class="my-4" />
+                <label class="flex items-center gap-3 cursor-pointer select-none">
+                  <input
+                    v-model="draft.compress"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  >
+                  <span>
+                    <span class="text-sm font-medium">启用 zstd 压缩发送（协议 A）</span>
+                    <span class="block text-xs text-muted-foreground">关闭后使用未压缩帧，便于对比传输耗时；仅影响宿主机→远程方向</span>
+                  </span>
+                </label>
               </CardContent>
             </Card>
           </TabsContent>

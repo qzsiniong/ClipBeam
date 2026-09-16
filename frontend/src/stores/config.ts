@@ -10,6 +10,7 @@ export interface Config {
   settle_ms: number
   receive_timeout_s: number
   max_text_kb: number
+  compress: boolean
 }
 
 export const useConfigStore = defineStore('config', () => {

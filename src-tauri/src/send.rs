@@ -52,8 +52,12 @@ pub fn run_once(
         ));
     }
 
-    // 2. 组帧
-    let frame = crate::protocol::build_keyboard_frame(&text);
+    // 2. 组帧（按配置决定是否启用 zstd 压缩）
+    let frame = if cfg.compress {
+        crate::protocol::build_keyboard_frame_compressed(&text)
+    } else {
+        crate::protocol::build_keyboard_frame(&text)
+    };
     let frame_chars = frame.chars().count();
 
     // 3. 等待修饰键抬起（可被中止）

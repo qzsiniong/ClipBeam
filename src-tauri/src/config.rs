@@ -22,6 +22,8 @@ pub struct Config {
     pub receive_timeout_s: u64,
     /// 键盘发送文本大小上限（KB，1KB=1024 字节）。
     pub max_text_kb: usize,
+    /// 是否启用 zstd 压缩发送（协议 A）。
+    pub compress: bool,
 }
 
 #[cfg(target_os = "macos")]
@@ -51,6 +53,7 @@ impl Default for Config {
             settle_ms: 200,
             receive_timeout_s: 120,
             max_text_kb: 256,
+            compress: true,
         }
     }
 }
