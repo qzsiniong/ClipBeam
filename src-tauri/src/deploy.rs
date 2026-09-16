@@ -38,7 +38,13 @@ pub fn sizes() -> (usize, usize) {
 }
 
 /// 逐字符把引导包打进当前焦点窗口（远程记事本）。
-pub fn type_bootstrap(cfg: &Config, cancel: &CancellationToken, settle: bool) -> TypeResult {
+/// `on_progress(sent, total)` 在每个字符发送后触发。
+pub fn type_bootstrap(
+    cfg: &Config,
+    cancel: &CancellationToken,
+    settle: bool,
+    mut on_progress: impl FnMut(usize, usize),
+) -> TypeResult {
     if settle && !Typer::wait_settle(cfg, cancel) {
         return TypeResult::Cancelled(0);
     }
@@ -48,7 +54,7 @@ pub fn type_bootstrap(cfg: &Config, cancel: &CancellationToken, settle: bool) ->
         Err(e) => return TypeResult::Failed(0, e),
     };
     std::thread::sleep(Duration::from_secs(3));
-    typer.type_str(&html)
+    typer.type_str(&html, &mut on_progress)
 }
 
 /// 把引导包放到宿主机剪贴板（远程桌面自带剪贴板同步时可直接粘贴）。

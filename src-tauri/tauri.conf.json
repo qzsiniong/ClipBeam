@@ -25,6 +25,21 @@
         "resizable": true,
         "visible": false,
         "hiddenTitle": true
+      },
+      {
+        "label": "progress",
+        "title": "ClipBeam 任务进度",
+        "width": 480,
+        "height": 280,
+        "resizable": false,
+        "visible": false,
+        "hiddenTitle": true,
+        "url": "index.html#/progress",
+        "alwaysOnTop": true,
+        "closable": false,
+        "minimizable": false,
+        "maximizable": false,
+        "decorations": false
       }
     ],
     "security": {

@@ -9,14 +9,11 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 
-interface Progress { got: number, total: number }
 interface TaskOutcome { title: string, body: string }
 type TaskKind = 'send' | 'recv' | 'deploytype' | null
 
 const busy = ref(false)
 const kind = ref<TaskKind>(null)
-const got = ref(0)
-const total = ref(0)
 const lastOutcome = ref<TaskOutcome | null>(null)
 const lastError = ref<string | null>(null)
 
@@ -79,19 +76,11 @@ onMounted(async () => {
   unlistens.push(await listen<TaskKind>('worker-started', (e) => {
     busy.value = true
     kind.value = e.payload
-    got.value = 0
-    total.value = 0
-  }))
-  unlistens.push(await listen<Progress>('worker-progress', (e) => {
-    got.value = e.payload.got
-    total.value = e.payload.total
   }))
   unlistens.push(await listen<TaskOutcome>('worker-finished', (e) => {
     lastOutcome.value = e.payload
     busy.value = false
     kind.value = null
-    got.value = 0
-    total.value = 0
   }))
   unlistens.push(await listen<string>('hotkey', async (e) => {
     const id = e.payload
@@ -123,21 +112,13 @@ const statusText = computed(() => {
     recv: '接收中',
     deploytype: '部署中',
   }
-  const label = kind.value ? labelMap[kind.value] : ''
-  if (kind.value === 'recv' && total.value > 0) {
-    return `${label} ${got.value}/${total.value} 帧`
-  }
-  return label
+  return kind.value ? labelMap[kind.value] : ''
 })
 
 const statusVariant = computed(() => {
   if (busy.value)
     return 'secondary'
   return 'success'
-})
-
-const progressWidth = computed(() => {
-  return total.value > 0 ? `${(got.value / total.value) * 100}%` : '0%'
 })
 </script>
 
@@ -174,20 +155,6 @@ const progressWidth = computed(() => {
         <div v-if="lastError" class="mb-4 p-3 rounded-lg bg-(--destructive)/10 border border-destructive">
           <div class="text-sm text-destructive">
             {{ lastError }}
-          </div>
-        </div>
-        <div v-if="busy && kind === 'recv'" class="space-y-1">
-          <div class="text-sm text-muted-foreground">
-            接收进度
-          </div>
-          <div class="w-full h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              class="h-full bg-primary transition-all"
-              :style="{ width: progressWidth }"
-            />
-          </div>
-          <div class="text-xs text-muted-foreground">
-            {{ got }} / {{ total }} 帧
           </div>
         </div>
       </CardContent>

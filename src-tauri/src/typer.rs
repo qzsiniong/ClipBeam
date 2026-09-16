@@ -65,7 +65,7 @@ impl Typer {
     ///
     /// 查 keymap 得基础字符与是否需 Shift；大写字母 / 特殊符号通过显式 Shift
     /// press/release 实现。未知字符（如非 ASCII）回退 `text()` Unicode 输入。
-    pub fn send_char(&mut self, ch: char) -> Result<(), String> {
+    pub fn send_char(&mut self, ch: char, dry_run: bool) -> Result<(), String> {
         match get_key_info(ch) {
             Some(KeyAction::Char {
                 #[allow(unused_variables)]
@@ -75,33 +75,47 @@ impl Typer {
                 mac_keycode,
             }) => {
                 if shift {
-                    let _ = self.enigo.key(Key::Shift, Direction::Press);
+                    if !dry_run {
+                        let _ = self.enigo.key(Key::Shift, Direction::Press);
+                    }
                     self.wait_delay();
                 }
                 #[cfg(target_os = "macos")]
                 {
                     // macOS 直接用 raw keycode，绕过 enigo 的 get_layoutdependent_keycode
                     // （后者遍历不 break，小键盘 `.`keycode=65 覆盖主键盘 47，导致 `>`→`.`）
-                    let _ = self.enigo.raw(mac_keycode, Direction::Click);
+                    if !dry_run {
+                        let _ = self.enigo.raw(mac_keycode, Direction::Click);
+                    }
                 }
                 #[cfg(not(target_os = "macos"))]
                 {
-                    let _ = self.enigo.key(Key::Unicode(base), Direction::Click);
+                    if !dry_run {
+                        self.enigo.key(Key::Unicode(base), Direction::Click);
+                    }
                 }
                 if shift {
                     self.wait_delay();
-                    let _ = self.enigo.key(Key::Shift, Direction::Release);
+                    if !dry_run {
+                        let _ = self.enigo.key(Key::Shift, Direction::Release);
+                    }
                 }
             }
             Some(KeyAction::Return) => {
-                let _ = self.enigo.key(Key::Return, Direction::Click);
+                if !dry_run {
+                    let _ = self.enigo.key(Key::Return, Direction::Click);
+                }
             }
             Some(KeyAction::Tab) => {
-                let _ = self.enigo.key(Key::Tab, Direction::Click);
+                if !dry_run {
+                    let _ = self.enigo.key(Key::Tab, Direction::Click);
+                }
             }
             None => {
                 // 非 ASCII / 未知字符：回退 Unicode 文本输入
-                let _ = self.enigo.text(&ch.to_string());
+                if !dry_run {
+                    let _ = self.enigo.text(&ch.to_string());
+                }
             }
         }
         Ok(())
@@ -109,16 +123,21 @@ impl Typer {
 
     /// 逐字符输入。开始前与每个字符前都检查取消令牌，
     /// 因此最坏停止延迟约等于一个键间隔（默认 3ms）。
-    pub fn type_str(&mut self, text: &str) -> TypeResult {
+    /// `on_progress(sent, total)` 在每个字符发送后触发，可用于进度展示。
+    pub fn type_str(
+        &mut self,
+        text: &str,
+        on_progress: &mut impl FnMut(usize, usize),
+    ) -> TypeResult {
         let total = text.chars().count();
         for (i, c) in text.chars().enumerate() {
             if self.cancel.is_cancelled() {
                 return TypeResult::Cancelled(i);
             }
-            if let Err(e) = self.send_char(c) {
+            if let Err(e) = self.send_char(c, false) {
                 return TypeResult::Failed(i, format!("键盘事件发送失败: {e}"));
             }
-
+            on_progress(i + 1, total);
             self.wait_delay();
         }
         TypeResult::Completed(total)

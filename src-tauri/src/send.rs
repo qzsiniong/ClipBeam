@@ -21,7 +21,13 @@ pub enum SendReport {
 ///
 /// 前置条件：触发时用户已把焦点切到远程页面。函数内仅等待 `settle` 让热键
 /// 修饰键抬起，不做任何焦点切换。
-pub fn run_once(cfg: &Config, cancel: &CancellationToken, settle: bool) -> SendReport {
+/// `on_progress(sent, total)` 在每个字符发送后触发。
+pub fn run_once(
+    cfg: &Config,
+    cancel: &CancellationToken,
+    settle: bool,
+    mut on_progress: impl FnMut(usize, usize),
+) -> SendReport {
     // 1. 读剪贴板
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(c) => c,
@@ -60,7 +66,7 @@ pub fn run_once(cfg: &Config, cancel: &CancellationToken, settle: bool) -> SendR
         Ok(t) => t,
         Err(e) => return SendReport::Error(e),
     };
-    match typer.type_str(&frame) {
+    match typer.type_str(&frame, &mut on_progress) {
         TypeResult::Completed(_) => SendReport::Done {
             frame_chars,
             text_bytes: text.len(),

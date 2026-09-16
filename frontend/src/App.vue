@@ -14,6 +14,9 @@ router.afterEach((to) => {
 })
 
 onMounted(async () => {
+  // 进度窗口不监听托盘菜单,由主窗口处理
+  if (getCurrentWindow().label === 'progress')
+    return
   // 监听托盘菜单事件 → 触发对应任务或打开设置
   await listen<string>('tray-menu', async (e) => {
     const id = e.payload
@@ -43,7 +46,7 @@ onMounted(async () => {
 
 <template>
   <div class="min-h-screen flex flex-col max-w-3xl mx-auto">
-    <nav class="flex gap-2 px-4 py-3 border-b">
+    <nav v-if="currentPath !== '/progress'" class="flex gap-2 px-4 py-3 border-b">
       <a
         class="px-3 py-1.5 rounded hover:bg-accent cursor-pointer"
         :class="{ 'bg-primary text-white': currentPath === '/' }"

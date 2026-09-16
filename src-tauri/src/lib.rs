@@ -53,7 +53,7 @@ pub fn run_cli(cmd: Command) {
     match cmd {
         Command::SendOnce => {
             eprintln!("请确认焦点已在远程接收页,0.2 秒后开始发送(Ctrl-C 可强杀进程)……");
-            match send::run_once(&cfg, &token, true) {
+            match send::run_once(&cfg, &token, true, |_, _| {}) {
                 send::SendReport::Done {
                     frame_chars,
                     text_bytes,
@@ -97,7 +97,7 @@ pub fn run_cli(cmd: Command) {
                 "请在远程打开记事本并聚焦,{:.1} 秒后开始敲入自解压接收页(共 {chars} 字符,约 {secs:.0} 秒,内嵌页面 {page_bytes} 字节)。Ctrl-C 可强杀。",
                 cfg.settle_ms as f64 / 1000.0
             );
-            match deploy::type_bootstrap(&cfg, &token, true) {
+            match deploy::type_bootstrap(&cfg, &token, true, |_, _| {}) {
                 typer::TypeResult::Completed(n) => {
                     eprintln!("✓ 引导包输入完成({n} 字符)。请在远程把记事本内容另存为 clipbeam.html(编码 UTF-8),双击打开即可。")
                 }
