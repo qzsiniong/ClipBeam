@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
-import { Button } from '@/components/ui/button'
 import { invoke } from '@tauri-apps/api/core'
+import { onUnmounted, ref } from 'vue'
+import { Button } from '@/components/ui/button'
 
-const props = defineProps<{
+const _props = defineProps<{
   label: string
   modelValue: string
 }>()
@@ -18,7 +18,8 @@ function onKeyDown(e: KeyboardEvent) {
   e.preventDefault()
   e.stopPropagation()
   // 忽略单独的修饰键按下
-  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return
+  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key))
+    return
 
   const mods = {
     ctrl: e.ctrlKey,
@@ -62,7 +63,7 @@ onUnmounted(() => {
     <span class="text-sm font-medium">{{ label }}</span>
     <Button
       :variant="capturing ? 'secondary' : 'outline'"
-      class="min-w-[220px] justify-start font-mono"
+      class="min-w-55 justify-start font-mono"
       @click="startCapture"
     >
       {{ capturing ? '按下新组合键…（再次点击取消）' : (modelValue || '未设置') }}

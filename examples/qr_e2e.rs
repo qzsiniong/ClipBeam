@@ -2,7 +2,7 @@
 //! 用法：cargo run --example qr_e2e -- /tmp/cbqr/*.gif
 //! 参数顺序任意（模拟截屏时帧乱序出现）。
 #![allow(dead_code)]
-#[path = "../src/protocol.rs"]
+#[path = "../src-tauri/src/protocol.rs"]
 mod protocol;
 
 use std::collections::HashMap;

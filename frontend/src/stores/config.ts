@@ -1,6 +1,6 @@
+import { invoke } from '@tauri-apps/api/core'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 
 export interface Config {
   send_hotkey: string
@@ -22,9 +22,11 @@ export const useConfigStore = defineStore('config', () => {
     error.value = null
     try {
       config.value = await invoke<Config>('get_config')
-    } catch (e) {
+    }
+    catch (e) {
       error.value = String(e)
-    } finally {
+    }
+    finally {
       loading.value = false
     }
   }
@@ -34,7 +36,8 @@ export const useConfigStore = defineStore('config', () => {
     try {
       await invoke('save_config', { config: cfg })
       config.value = { ...cfg }
-    } catch (e) {
+    }
+    catch (e) {
       error.value = String(e)
       throw e
     }
