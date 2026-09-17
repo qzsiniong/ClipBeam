@@ -43,6 +43,32 @@ fn default_recv_hotkey() -> String {
     "Ctrl+Shift+J".into()
 }
 
+/// 判断热键 spec(如 "Cmd+Shift+KeyK")是否至少含一个修饰键。
+/// 最后一段是主键,前面的段与 global-hotkey 解析器的修饰键别名比对。
+fn has_modifier(spec: &str) -> bool {
+    spec.split('+')
+        .rev()
+        .skip(1) // 跳过主键
+        .map(|t| t.trim().to_ascii_uppercase())
+        .any(|m| {
+            matches!(
+                m.as_str(),
+                "CTRL"
+                    | "CONTROL"
+                    | "CMD"
+                    | "COMMAND"
+                    | "SUPER"
+                    | "ALT"
+                    | "OPTION"
+                    | "SHIFT"
+                    | "COMMANDORCONTROL"
+                    | "COMMANDORCTRL"
+                    | "CMDORCTRL"
+                    | "CMDORCONTROL"
+            )
+        })
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -80,6 +106,14 @@ impl Config {
             || self.recv_hotkey == self.stop_hotkey
         {
             errs.push("三个热键不能重复".into());
+        }
+        // send/recv 为无修饰单键会全局拦截正常打字(如纯 K),
+        // 要求至少含一个修饰键;stop(Esc)允许单键。
+        if !has_modifier(&self.send_hotkey) {
+            errs.push("发送热键必须含至少一个修饰键(Cmd/Ctrl/Alt/Shift)".into());
+        }
+        if !has_modifier(&self.recv_hotkey) {
+            errs.push("接收热键必须含至少一个修饰键(Cmd/Ctrl/Alt/Shift)".into());
         }
         if self.key_delay_ms > 100 {
             errs.push("键延迟需在 0~100ms 之间".into());

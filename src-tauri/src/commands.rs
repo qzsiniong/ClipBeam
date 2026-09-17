@@ -25,7 +25,12 @@ pub async fn save_config(
     }
     config.save().map_err(|e| e.to_string())?;
     *state.config.write().unwrap() = config.clone();
-    crate::hotkey::reregister(&app, &config).map_err(|e| e.to_string())?;
+    // 按当前忙闲状态用新配置重建热键(忙时保留 Esc + 当前任务热键)
+    let mode = match state.current_kind().await {
+        Some(kind) => crate::hotkey::HotkeyMode::Busy(kind),
+        None => crate::hotkey::HotkeyMode::Idle,
+    };
+    crate::hotkey::set_mode(&app, &config, mode).map_err(|e| e.to_string())?;
     let _ = app.emit("config-saved", &config);
     crate::notify::notify("ClipBeam", "设置已保存,热键已重注册");
     Ok(())

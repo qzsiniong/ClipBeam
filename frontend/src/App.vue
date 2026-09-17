@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { onMounted, ref } from 'vue'
@@ -17,25 +16,13 @@ onMounted(async () => {
   // 进度窗口不监听托盘菜单,由主窗口处理
   if (getCurrentWindow().label === 'progress')
     return
-  // 监听托盘菜单事件 → 触发对应任务或打开设置
+  // 监听托盘「设置」菜单(任务类菜单由 Rust 直接处理,不再经前端)
   await listen<string>('tray-menu', async (e) => {
     const id = e.payload
     if (id === 'settings') {
       await getCurrentWindow().show()
       await getCurrentWindow().setFocus()
       router.push('/settings')
-    }
-    else if (id === 'send') {
-      await invoke('start_send')
-    }
-    else if (id === 'recv') {
-      await invoke('start_recv')
-    }
-    else if (id === 'deploy_type') {
-      await invoke('start_deploy_type')
-    }
-    else if (id === 'deploy_copy') {
-      await invoke('deploy_copy')
     }
   })
 })

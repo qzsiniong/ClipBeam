@@ -1,75 +1,109 @@
 //! 全局热键:用 `tauri-plugin-global-shortcut` 替代裸 `global-hotkey` crate。
-//! 策略简化:Rust 侧固定注册三个热键,按下时 emit "hotkey" 事件 + 语义 id
-//! (send/recv/stop);前端监听事件后根据当前 worker 状态决定 start/cancel。
-//! 这样 Rust 侧无需做忙时热键切换注册。
+//! 动态注册,避免空闲时拦截 Esc 等单键影响其他应用:
+//! - 空闲:仅注册 send/recv 触发键(stop/Esc 不注册,透传给前台应用);
+//! - 忙时:注销触发键,改注册 stop(Esc)+ 当前任务热键(再按即停),二者均取消任务。
+//! 启动失败通过系统通知反馈。
 
-use crate::config::Config;
-use tauri::{AppHandle, Emitter};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-
-const ID_SEND: &str = "send";
-const ID_RECV: &str = "recv";
-const ID_STOP: &str = "stop";
+use crate::{commands, config::Config, notify, worker};
+use tauri::{AppHandle, Manager, async_runtime::spawn};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
 type GsResult<T> = Result<T, tauri_plugin_global_shortcut::Error>;
 
-/// 注册三个全局热键(空闲模式:send + recv + stop)。
-/// 重复注册会失败,调用前应先 `unregister_all`。
-pub fn register(app: &AppHandle, cfg: &Config) -> GsResult<()> {
+/// 热键注册模式。
+pub enum HotkeyMode {
+    /// 空闲:只注册发送/接收触发键。
+    Idle,
+    /// 忙时:注册中止键 + 该任务自己的触发热键(DeployType 无触发热键)。
+    Busy(worker::TaskKind),
+}
+
+/// 按模式重建全部热键。内部先 unregister_all,可安全重复调用。
+/// 注册失败返回错误,由调用方决定是否提示(不应阻断任务生命周期)。
+pub fn set_mode(app: &AppHandle, cfg: &Config, mode: HotkeyMode) -> GsResult<()> {
     let gs = app.global_shortcut();
-
-    let spec_send = cfg.send_hotkey.clone();
-    gs.on_shortcut(spec_send.as_str(), move |app, _sc, event| {
-        if event.state() == ShortcutState::Pressed {
-            let _ = app.emit("hotkey", ID_SEND);
+    gs.unregister_all()?;
+    match mode {
+        HotkeyMode::Idle => {
+            gs.on_shortcut(cfg.send_hotkey.as_str(), on_start_send)?;
+            gs.on_shortcut(cfg.recv_hotkey.as_str(), on_start_recv)?;
         }
-    })?;
-
-    let spec_recv = cfg.recv_hotkey.clone();
-    gs.on_shortcut(spec_recv.as_str(), move |app, _sc, event| {
-        if event.state() == ShortcutState::Pressed {
-            let _ = app.emit("hotkey", ID_RECV);
+        HotkeyMode::Busy(kind) => {
+            gs.on_shortcut(cfg.stop_hotkey.as_str(), on_cancel)?;
+            match kind {
+                worker::TaskKind::Send => {
+                    gs.on_shortcut(cfg.send_hotkey.as_str(), on_cancel)?;
+                }
+                worker::TaskKind::Recv => {
+                    gs.on_shortcut(cfg.recv_hotkey.as_str(), on_cancel)?;
+                }
+                worker::TaskKind::DeployType => {}
+            }
         }
-    })?;
-
-    let spec_stop = cfg.stop_hotkey.clone();
-    gs.on_shortcut(spec_stop.as_str(), move |app, _sc, event| {
-        if event.state() == ShortcutState::Pressed {
-            let _ = app.emit("hotkey", ID_STOP);
-        }
-    })?;
-
+    }
     Ok(())
 }
 
-/// 注销全部热键后重新注册(配置变更后用)。
-pub fn reregister(app: &AppHandle, cfg: &Config) -> GsResult<()> {
-    let gs = app.global_shortcut();
-    gs.unregister_all()?;
-    register(app, cfg)
+/// 空闲模式:发送热键 → 启动发送任务。
+fn on_start_send(app: &AppHandle, _sc: &Shortcut, event: ShortcutEvent) {
+    if event.state() == ShortcutState::Pressed {
+        let app_clone = app.clone();
+        spawn(async move {
+            let state = app_clone.state::<worker::WorkerState>();
+            if let Err(e) = commands::start_send(app_clone.clone(), state).await {
+                notify::notify("ClipBeam", &e);
+            }
+        });
+    }
+}
+
+/// 空闲模式:接收热键 → 启动接收任务。
+fn on_start_recv(app: &AppHandle, _sc: &Shortcut, event: ShortcutEvent) {
+    if event.state() == ShortcutState::Pressed {
+        let app_clone = app.clone();
+        spawn(async move {
+            let state = app_clone.state::<worker::WorkerState>();
+            if let Err(e) = commands::start_recv(app_clone.clone(), state).await {
+                notify::notify("ClipBeam", &e);
+            }
+        });
+    }
+}
+
+/// 忙时模式:Esc 或当前任务热键 → 取消任务。
+fn on_cancel(app: &AppHandle, _sc: &Shortcut, event: ShortcutEvent) {
+    if event.state() == ShortcutState::Pressed {
+        let app_clone = app.clone();
+        spawn(async move {
+            let state = app_clone.state::<worker::WorkerState>();
+            let _ = commands::cancel_task(app_clone.clone(), state).await;
+        });
+    }
 }
 
 /// 前端捕获热键后,把物理键名 + 修饰键转成 global-shortcut 可解析的规范字符串。
-/// 复用原 settings.rs::hotkey_spec 的规范化逻辑:
-/// 输入 code="KeyK", mods={ctrl:true,shift:true} → 输出 "Cmd+Shift+KeyK"(macOS)
-/// 或 "Ctrl+Shift+KeyK"(其他平台)。
+/// 修饰键按物理语义独立映射(Ctrl→Ctrl、Meta/Win→Super),不做跨平台偷换:
+/// 输入 code="KeyK", mods={super_:true,shift:true} → "Super+Shift+KeyK"
+/// (macOS 注册为 Cmd+Shift+K,Windows 上 Ctrl 组合则为 "Ctrl+Shift+KeyK")。
 pub fn spec_from_frontend(code: &str, mods: &HotkeyMods) -> Option<String> {
     // 前端传的 e.code 已经是 "KeyK" / "Escape" / "Digit1" 格式,
     // 与原 winit KeyCode 的 Debug 名一致,直接用。
     let name = code;
     let mut parts: Vec<&str> = Vec::new();
-    #[cfg(target_os = "macos")]
-    let primary = "Cmd";
-    #[cfg(not(target_os = "macos"))]
-    let primary = "Ctrl";
-    if mods.super_ || mods.ctrl {
-        parts.push(primary);
+    // 修饰键必须独立映射,不能用 || 合并:
+    // 否则 macOS 上 Ctrl 会被偷换成 Cmd、Windows 上 Super 会被偷换成 Ctrl。
+    // global-hotkey 解析时 SUPER/CMD/COMMAND 同义(平台各自映射)。
+    if mods.ctrl {
+        parts.push("Ctrl");
     }
-    if mods.shift {
-        parts.push("Shift");
+    if mods.super_ {
+        parts.push("Super");
     }
     if mods.alt {
         parts.push("Alt");
+    }
+    if mods.shift {
+        parts.push("Shift");
     }
     let spec = if parts.is_empty() {
         name.to_string()

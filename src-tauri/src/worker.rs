@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 const PROGRESS_THROTTLE_MS: u64 = 50;
 
 /// 任务种类(与原 main.rs 的 TaskKind 等价)。
-#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskKind {
     Send,
@@ -92,9 +92,11 @@ impl WorkerState {
         }
         let token = CancellationToken::new();
         let cfg = self.config.read().unwrap().clone();
+        let cfg_for_busy = cfg.clone();
         let app_clone = app.clone();
         let progress = self.progress.clone();
         let current = self.current.clone();
+        let config_store = self.config.clone();
         let started_at_clone = self.started_at.clone();
         let tok = token.clone();
 
@@ -159,6 +161,14 @@ impl WorkerState {
             if let Ok(mut c) = current.try_lock() {
                 *c = None;
             }
+            // 任务真正结束后恢复空闲热键(释放 Esc);读最新配置,
+            // 兼容任务运行期间在设置页改过热键的情况。
+            let cfg_fresh = config_store.read().map(|c| c.clone()).unwrap_or_default();
+            if let Err(e) =
+                crate::hotkey::set_mode(&app_clone, &cfg_fresh, crate::hotkey::HotkeyMode::Idle)
+            {
+                log::error!("恢复空闲热键失败: {e}");
+            }
         });
 
         cur.replace(Handle {
@@ -167,6 +177,13 @@ impl WorkerState {
             abort: handle.abort_handle(),
         });
         let _ = app.emit("worker-started", kind);
+        // 切换为忙时热键:Esc + 当前任务热键,注销其他触发键(含空闲时不注册的 Esc)。
+        if let Err(e) =
+            crate::hotkey::set_mode(&app, &cfg_for_busy, crate::hotkey::HotkeyMode::Busy(kind))
+        {
+            log::error!("切换忙时热键失败: {e}");
+            notify::notify("ClipBeam", "热键切换失败,任务仍在运行");
+        }
         Ok(())
     }
 
@@ -201,8 +218,7 @@ impl WorkerState {
         }
     }
 
-    /// 当前任务种类(供 hotkey.rs 忙闲切换用)。
-    #[allow(dead_code)]
+    /// 当前任务种类(供配置保存后选择忙/闲热键注册模式)。
     pub async fn current_kind(&self) -> Option<TaskKind> {
         self.current.lock().await.as_ref().map(|h| h.kind)
     }

@@ -82,22 +82,6 @@ onMounted(async () => {
     busy.value = false
     kind.value = null
   }))
-  unlistens.push(await listen<string>('hotkey', async (e) => {
-    const id = e.payload
-    if (busy.value) {
-      // 忙时:stop 或当前任务热键 → 中止
-      if (id === 'stop' || id === kind.value) {
-        await cancelTask()
-      }
-    }
-    else {
-      // 空闲:send/recv 触发新任务
-      if (id === 'send')
-        await startSend()
-      else if (id === 'recv')
-        await startRecv()
-    }
-  }))
 })
 
 onUnmounted(() => {

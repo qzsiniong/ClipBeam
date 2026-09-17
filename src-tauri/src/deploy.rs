@@ -90,8 +90,8 @@ mod tests {
         assert!(
             payload
                 .bytes()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()),
-            "载荷只能含大写字母与数字"
+                .all(|b| b.is_ascii_lowercase() || b"234567".contains(&b)),
+            "载荷只能含小写字母与 2-7(b32_encode_lower)"
         );
         // 与模板中解码表等价的 Rust 解码应还原出原页面字节
         let decoded = crate::protocol::b32_decode(payload).unwrap();

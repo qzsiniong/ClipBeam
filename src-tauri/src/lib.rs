@@ -21,7 +21,7 @@ mod worker;
 
 use clap::{Parser, Subcommand};
 use config::Config;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, async_runtime::spawn};
 
 // ---------------------------------------------------------------------------
 // CLI 子命令(联调用)
@@ -135,17 +135,71 @@ pub fn run() {
                 .set_activation_policy(tauri::ActivationPolicy::Accessory)?;
             let cfg = Config::load();
             tray::build(app, &cfg)?;
-            hotkey::register(app.handle(), &cfg)?;
+            // 启动时为空闲模式:仅注册发送/接收热键,Esc 不拦截
+            hotkey::set_mode(app.handle(), &cfg, hotkey::HotkeyMode::Idle)?;
             app.manage(worker::WorkerState::new(cfg));
             Ok(())
         })
         .on_tray_icon_event(|app, event| tray::on_tray_event(app, event))
         .on_menu_event(|app, event| {
-            let id = event.id().as_ref().to_string();
-            if id == tray::M_QUIT {
-                app.exit(0);
-            } else {
-                let _ = app.emit("tray-menu", id);
+            let id = event.id().as_ref();
+            match id {
+                tray::M_QUIT => app.exit(0),
+                tray::M_DEPLOY_TYPE => {
+                    let app_clone = app.clone();
+                    spawn(async move {
+                        if let Err(e) = commands::start_deploy_type(
+                            app_clone.clone(),
+                            app_clone.state::<worker::WorkerState>(),
+                        )
+                        .await
+                        {
+                            crate::notify::notify("ClipBeam", &e);
+                        }
+                    });
+                }
+                tray::M_DEPLOY_COPY => {
+                    spawn(async move {
+                        match commands::deploy_copy().await {
+                            Ok(chars) => crate::notify::notify(
+                                "ClipBeam",
+                                &format!("自解压接收页({chars} 字符)已复制到宿主机剪贴板"),
+                            ),
+                            Err(e) => {
+                                crate::notify::notify("ClipBeam", &format!("复制失败: {e}"))
+                            }
+                        }
+                    });
+                }
+                tray::M_RECV => {
+                    let app_clone = app.clone();
+                    spawn(async move {
+                        if let Err(e) = commands::start_recv(
+                            app_clone.clone(),
+                            app_clone.state::<worker::WorkerState>(),
+                        )
+                        .await
+                        {
+                            crate::notify::notify("ClipBeam", &e);
+                        }
+                    });
+                }
+                tray::M_SEND => {
+                    let app_clone = app.clone();
+                    spawn(async move {
+                        if let Err(e) = commands::start_send(
+                            app_clone.clone(),
+                            app_clone.state::<worker::WorkerState>(),
+                        )
+                        .await
+                        {
+                            crate::notify::notify("ClipBeam", &e);
+                        }
+                    });
+                }
+                _ => {
+                    let _ = app.emit("tray-menu", id);
+                },
             }
         })
         .on_window_event(|window, event| {
