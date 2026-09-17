@@ -7,6 +7,7 @@
 //! 其他平台：使用 enigo。
 
 use enigo::{Direction, Key, Keyboard};
+use log::debug;
 
 use crate::cancel::CancellationToken;
 use crate::config::Config;
@@ -26,6 +27,11 @@ pub enum TypeResult {
 pub struct Typer {
     delay: Duration,
     cancel: CancellationToken,
+    // macOS: ManuallyDrop 跳过 enigo 的 Drop——其 Drop 内有累积 sleep 逻辑
+    //（每次按键 update_wait_time 累加 20ms，长文本 Drop 时会阻塞数秒甚至数分钟）。
+    #[cfg(target_os = "macos")]
+    enigo: std::mem::ManuallyDrop<enigo::Enigo>,
+    #[cfg(not(target_os = "macos"))]
     enigo: enigo::Enigo,
 }
 
@@ -36,6 +42,9 @@ impl Typer {
         Ok(Self {
             delay: cfg.key_delay(),
             cancel,
+            #[cfg(target_os = "macos")]
+            enigo: std::mem::ManuallyDrop::new(enigo),
+            #[cfg(not(target_os = "macos"))]
             enigo,
         })
     }
@@ -66,6 +75,7 @@ impl Typer {
     /// 查 keymap 得基础字符与是否需 Shift；大写字母 / 特殊符号通过显式 Shift
     /// press/release 实现。未知字符（如非 ASCII）回退 `text()` Unicode 输入。
     pub fn send_char(&mut self, ch: char, dry_run: bool) -> Result<(), String> {
+        debug!("send_char {:?}, dry_run: {}", ch, dry_run);
         match get_key_info(ch) {
             Some(KeyAction::Char {
                 #[allow(unused_variables)]
@@ -141,5 +151,14 @@ impl Typer {
             self.wait_delay();
         }
         TypeResult::Completed(total)
+    }
+}
+
+impl Drop for Typer {
+    fn drop(&mut self) {
+        // 释放可能残留的 Shift（任务中途取消时 Shift 可能处于按下状态）
+        let _ = self.enigo.key(Key::Shift, Direction::Release);
+        // macOS: enigo 包在 ManuallyDrop 中，其 Drop（含累积 sleep）不会运行
+        // 其他平台: enigo 正常 Drop
     }
 }

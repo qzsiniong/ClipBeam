@@ -5,6 +5,7 @@ use clap::Parser;
 use clipbeam_lib::Cli;
 
 fn main() {
+    env_logger::init();
     let cli = Cli::parse();
     match cli.command {
         Some(cmd) => clipbeam_lib::run_cli(cmd),
