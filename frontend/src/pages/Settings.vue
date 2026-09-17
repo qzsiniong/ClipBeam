@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Config } from '@/stores/config'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { computed, onMounted, ref } from 'vue'
 import HotkeyCapture from '@/components/HotkeyCapture.vue'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +54,7 @@ async function save() {
   errors.value = []
   try {
     await store.save(draft.value)
+    await getCurrentWindow().hide()
   }
   catch (e) {
     errors.value = [String(e)]
@@ -63,6 +65,8 @@ function cancel() {
   if (store.config)
     draft.value = { ...store.config }
   errors.value = []
+
+  getCurrentWindow().hide()
 }
 </script>
 
