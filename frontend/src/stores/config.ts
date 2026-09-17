@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+export type ProgressDisplay = 'floating' | 'tray' | 'both'
+
 export interface Config {
   send_hotkey: string
   recv_hotkey: string
@@ -11,6 +13,8 @@ export interface Config {
   receive_timeout_s: number
   max_text_kb: number
   compress: boolean
+  progress_display: ProgressDisplay
+  send_real_keys: boolean
 }
 
 export const useConfigStore = defineStore('config', () => {

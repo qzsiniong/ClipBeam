@@ -5,9 +5,6 @@ import { listen } from '@tauri-apps/api/event'
 import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
-
 interface ProgressPayload {
   kind: 'send' | 'recv' | 'deploytype'
   got: number
@@ -39,7 +36,7 @@ function startTick() {
     return
   tickTimer = window.setInterval(() => {
     now.value = Date.now()
-  }, 100)
+  }, 500)
 }
 
 function stopTick() {
@@ -55,7 +52,7 @@ function scheduleHide() {
   hideTimer = window.setTimeout(async () => {
     stopTick()
     await getCurrentWindow().hide()
-  }, 3000)
+  }, 5000)
 }
 
 function clearHide() {
@@ -66,42 +63,24 @@ function clearHide() {
 }
 
 async function positionWindowRight() {
-  // 1. 获取当前窗口所在的显示器信息
-  // currentMonitor() 返回的是包含物理尺寸和缩放因子的对象
   const appWindow = getCurrentWindow()
-  const monitor = await currentMonitor() // 获取当前显示器
-
+  const monitor = await currentMonitor()
   if (monitor) {
-    // 2. 获取显示器的逻辑尺寸 (已自动处理缩放)
-    // size 是 PhysicalSize, availableSize 也是 PhysicalSize
-    // 我们需要通过 scaleFactor 转换为逻辑尺寸，或者直接使用 API 提供的逻辑方法
     const scaleFactor = monitor.scaleFactor
-    // 物理尺寸转逻辑尺寸
     const screenLogicalWidth = monitor.size.width / scaleFactor
-
-    // 3. 获取当前窗口的逻辑大小
-    // innerSize() 返回的是 PhysicalSize，同样需要转换
     const physicalWinSize = await appWindow.innerSize()
     const winLogicalWidth = physicalWinSize.width / scaleFactor
-    // const winLogicalHeight = physicalWinSize.height / scaleFactor
-
-    // 4. 计算靠右的 X 坐标 (逻辑坐标)
-    // 如果想要紧贴右边缘，x = 屏幕逻辑宽 - 窗口逻辑宽
-    const x = screenLogicalWidth - winLogicalWidth - 10 // 留出 10 像素边距
-    const y = 100 // 顶部对齐，可根据需求调整
-
-    // 5. 设置位置
-    // setPosition 接受 LogicalPosition 或 PhysicalPosition
-    // 传入 LogicalPosition 时，Tauri 会自动根据当前缩放因子转换为物理坐标发送给系统
+    const x = screenLogicalWidth - winLogicalWidth - 10
+    const y = 100
     await appWindow.setPosition(new LogicalPosition(x, y))
   }
 }
 
 const titleText = computed(() => {
   const map: Record<string, string> = {
-    send: '发送到远程',
-    recv: '截屏接收',
-    deploytype: '部署接收页',
+    send: '发送',
+    recv: '接收',
+    deploytype: '部署',
   }
   return kind.value ? map[kind.value] : ''
 })
@@ -188,60 +167,46 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-semibold">
-        {{ titleText || '任务进度' }}
-      </h2>
-      <Badge :variant="isBusy ? 'secondary' : finished ? 'success' : 'default'">
-        {{ isBusy ? '进行中' : finished ? '完成' : cancelled ? '已中止' : '空闲' }}
-      </Badge>
+  <!-- 悬浮条布局:紧凑单行 -->
+  <div class="flex h-screen items-center gap-3 rounded-xl bg-background px-3 shadow-lg">
+    <!-- 左:任务名 + 状态 -->
+    <div class="flex shrink-0 flex-col">
+      <span class="text-xs font-semibold">{{ titleText || '任务' }}</span>
+      <span v-if="isBusy" class="text-[10px] text-primary">进行中</span>
+      <span v-else-if="finished" class="text-[10px] text-green-600">完成</span>
+      <span v-else-if="cancelled" class="text-[10px] text-red-500">已中止</span>
     </div>
 
-    <!-- 运行中:进度条 + 统计 -->
-    <div v-if="isBusy && total > 0" class="space-y-3">
-      <div class="w-full h-3 rounded-full bg-muted overflow-hidden">
+    <!-- 中:进度条 -->
+    <div v-if="isBusy && total > 0" class="flex flex-1 flex-col gap-1">
+      <div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
         <div
-          class="h-full bg-primary transition-all duration-150"
+          class="h-full bg-primary transition-all duration-700"
           :style="{ width: `${progressPercent}%` }"
         />
       </div>
-      <div class="text-sm text-muted-foreground">
-        {{ got }} / {{ total }} {{ unitLabel }} · {{ progressPercent.toFixed(1) }}%
-      </div>
-      <div class="text-xs text-muted-foreground">
-        已用 {{ fmtDuration(elapsedMs) }}
-        <span v-if="speed > 0">
-          · 速度 {{ speed.toFixed(1) }} {{ speedUnit }}
-          · 剩余 {{ fmtDuration(remainingMs) }}
-        </span>
+      <div class="flex items-center justify-between text-[10px] text-muted-foreground">
+        <span>{{ progressPercent.toFixed(0) }}%</span>
+        <span>{{ got }}/{{ total }}{{ unitLabel }}</span>
+        <span v-if="speed > 0">{{ Math.floor(speed) }}{{ speedUnit }}</span>
+        <span v-if="remainingMs > 0">剩余{{ fmtDuration(remainingMs) }}</span>
+        <span>已用{{ fmtDuration(elapsedMs) }}</span>
       </div>
     </div>
 
-    <!-- 运行中但还没收到进度(初始化阶段) -->
-    <div v-else-if="isBusy" class="text-sm text-muted-foreground">
-      正在初始化…
+    <!-- 进行中但未收到进度 -->
+    <div v-else-if="isBusy" class="flex-1 text-xs text-muted-foreground">
+      初始化…
     </div>
 
-    <!-- 结束:结果卡片 -->
-    <Card v-else-if="finished" class="border-primary/30 bg-primary/5">
-      <CardContent class="pt-4">
-        <div class="font-medium">
-          {{ finished.title }}
-        </div>
-        <div class="text-sm text-muted-foreground mt-1">
-          {{ finished.body }}
-        </div>
-      </CardContent>
-    </Card>
+    <!-- 完成 -->
+    <div v-else-if="finished" class="flex-1 text-xs text-muted-foreground line-clamp-2 overflow-hidden">
+      {{ finished.body }}
+    </div>
 
     <!-- 中止 -->
-    <Card v-else-if="cancelled" class="border-destructive/30 bg-destructive/5">
-      <CardContent class="pt-4">
-        <div class="text-sm text-destructive">
-          任务已中止
-        </div>
-      </CardContent>
-    </Card>
+    <div v-else-if="cancelled" class="flex-1 text-xs text-red-500">
+      已中止
+    </div>
   </div>
 </template>

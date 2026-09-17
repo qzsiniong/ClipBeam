@@ -17,6 +17,13 @@ const kind = ref<TaskKind>(null)
 const lastOutcome = ref<TaskOutcome | null>(null)
 const lastError = ref<string | null>(null)
 
+// 实时进度(改进 2)
+const progressGot = ref(0)
+const progressTotal = ref(0)
+const progressStartedAt = ref(0)
+const now = ref(Date.now())
+let tickTimer: number | null = null
+
 const unlistens: UnlistenFn[] = []
 
 async function startSend() {
@@ -72,20 +79,61 @@ async function showWindow() {
   await getCurrentWindow().setFocus()
 }
 
+function startTick() {
+  if (tickTimer !== null)
+    return
+  tickTimer = window.setInterval(() => {
+    now.value = Date.now()
+  }, 500)
+}
+
+function stopTick() {
+  if (tickTimer !== null) {
+    clearInterval(tickTimer)
+    tickTimer = null
+  }
+}
+
+function fmtDuration(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  if (s < 60)
+    return `${s}s`
+  const m = Math.floor(s / 60)
+  return `${m}m${s % 60}s`
+}
+
 onMounted(async () => {
   unlistens.push(await listen<TaskKind>('worker-started', (e) => {
     busy.value = true
     kind.value = e.payload
+    progressGot.value = 0
+    progressTotal.value = 0
+    progressStartedAt.value = 0
+    startTick()
+  }))
+  unlistens.push(await listen<{ got: number, total: number, started_at: number }>('worker-progress', (e) => {
+    progressGot.value = e.payload.got
+    progressTotal.value = e.payload.total
+    progressStartedAt.value = e.payload.started_at
+    now.value = Date.now()
   }))
   unlistens.push(await listen<TaskOutcome>('worker-finished', (e) => {
     lastOutcome.value = e.payload
     busy.value = false
     kind.value = null
+    stopTick()
+  }))
+  unlistens.push(await listen<string>('worker-cancelled', () => {
+    busy.value = false
+    kind.value = null
+    stopTick()
+    lastError.value = '任务已中止'
   }))
 })
 
 onUnmounted(() => {
   unlistens.forEach(fn => fn())
+  stopTick()
 })
 
 const statusText = computed(() => {
@@ -104,31 +152,61 @@ const statusVariant = computed(() => {
     return 'secondary'
   return 'success'
 })
+
+const elapsedMs = computed(() =>
+  progressStartedAt.value ? Math.max(0, now.value - progressStartedAt.value) : 0,
+)
+
+const speed = computed(() => {
+  if (elapsedMs.value < 500 || progressGot.value === 0)
+    return 0
+  return progressGot.value / (elapsedMs.value / 1000)
+})
+
+const progressPercent = computed(() =>
+  progressTotal.value > 0 ? Math.min(100, (progressGot.value / progressTotal.value) * 100) : 0,
+)
+
+const unitLabel = computed(() => (kind.value === 'recv' ? '帧' : '字符'))
+const speedUnit = computed(() => (kind.value === 'recv' ? '帧/秒' : '字符/秒'))
 </script>
 
 <template>
   <div class="space-y-4">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold">
-          ClipBeam
-        </h1>
-        <p class="text-sm text-muted-foreground">
-          宿主机 ↔ 远程剪贴板桥
-        </p>
-      </div>
-      <Badge :variant="statusVariant">
-        {{ statusText }}
-      </Badge>
-    </div>
-
-    <Card>
+    <!-- 任务状态卡片 -->
+    <Card class="rounded-xl shadow-sm">
       <CardHeader>
-        <CardTitle>任务状态</CardTitle>
-        <CardDescription>点击下方按钮触发，或使用全局热键</CardDescription>
+        <div class="flex items-center justify-between">
+          <div>
+            <CardTitle>任务状态</CardTitle>
+            <CardDescription>点击下方按钮触发，或使用全局热键</CardDescription>
+          </div>
+          <Badge :variant="statusVariant">
+            {{ statusText }}
+          </Badge>
+        </div>
       </CardHeader>
       <CardContent>
-        <div v-if="lastOutcome" class="mb-4 p-3 rounded-lg bg-(--accent)/10 border border-border">
+        <!-- 实时进度(改进 2) -->
+        <div v-if="busy && progressTotal > 0" class="space-y-2 mb-4">
+          <div class="w-full h-2 rounded-full bg-muted overflow-hidden">
+            <div
+              class="h-full bg-primary transition-all duration-700"
+              :style="{ width: `${progressPercent}%` }"
+            />
+          </div>
+          <div class="text-sm text-muted-foreground">
+            {{ progressGot }} / {{ progressTotal }} {{ unitLabel }} · {{ progressPercent.toFixed(0) }}%
+          </div>
+          <div class="text-xs text-muted-foreground">
+            已用 {{ fmtDuration(elapsedMs) }}
+            <span v-if="speed > 0">
+              · 速度 {{ Math.floor(speed) }} {{ speedUnit }}
+            </span>
+          </div>
+        </div>
+
+        <div v-if="lastOutcome" class="mb-4 p-3 rounded-lg bg-primary/5 border border-primary/30">
           <div class="font-medium">
             {{ lastOutcome.title }}
           </div>
@@ -136,7 +214,7 @@ const statusVariant = computed(() => {
             {{ lastOutcome.body }}
           </div>
         </div>
-        <div v-if="lastError" class="mb-4 p-3 rounded-lg bg-(--destructive)/10 border border-destructive">
+        <div v-if="lastError" class="mb-4 p-3 rounded-lg bg-destructive/5 border border-destructive/30">
           <div class="text-sm text-destructive">
             {{ lastError }}
           </div>
@@ -163,7 +241,8 @@ const statusVariant = computed(() => {
 
     <Separator />
 
-    <Card>
+    <!-- 快捷入口 -->
+    <Card class="rounded-xl shadow-sm">
       <CardHeader>
         <CardTitle>快捷入口</CardTitle>
       </CardHeader>

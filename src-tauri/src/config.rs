@@ -5,6 +5,24 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// 进度显示方式。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProgressDisplay {
+    /// 无框悬浮条(右上角 overlay 窗口)。
+    Floating,
+    /// 托盘图标进度(状态栏图标动态变化)。
+    Tray,
+    /// 两者同时。
+    Both,
+}
+
+impl Default for ProgressDisplay {
+    fn default() -> Self {
+        ProgressDisplay::Floating
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
@@ -24,6 +42,10 @@ pub struct Config {
     pub max_text_kb: usize,
     /// 是否启用 zstd 压缩发送（协议 A）。
     pub compress: bool,
+    /// 进度显示方式。
+    pub progress_display: ProgressDisplay,
+    /// 是否启用按键真实发送。
+    pub send_real_keys: bool,
 }
 
 #[cfg(target_os = "macos")]
@@ -80,6 +102,8 @@ impl Default for Config {
             receive_timeout_s: 120,
             max_text_kb: 256,
             compress: true,
+            progress_display: ProgressDisplay::Floating,
+            send_real_keys: true,
         }
     }
 }

@@ -4,7 +4,8 @@
   "description": "Capability for the main window of ClipBeam",
   "windows": [
     "main",
-    "progress"
+    "progress",
+    "standby"
   ],
   "permissions": [
     "core:default",

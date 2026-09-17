@@ -61,150 +61,186 @@ async function save() {
   }
 }
 
-function cancel() {
+async function cancel() {
   if (store.config)
     draft.value = { ...store.config }
   errors.value = []
-
-  getCurrentWindow().hide()
+  await getCurrentWindow().hide()
 }
 </script>
 
 <template>
-  <div>
-    <div class="">
-      <div class="mb-6">
-        <h1 class="text-2xl font-bold mb-1">
-          ClipBeam 设置
-        </h1>
-        <p class="text-sm text-muted-foreground">
-          热键与传输参数配置
-        </p>
-      </div>
+  <div class="flex flex-col gap-6 pb-20">
+    <Tabs v-if="draft" default-value="hotkeys">
+      <TabsList class="grid grid-cols-2 w-full h-9">
+        <TabsTrigger value="hotkeys" class="text-sm font-medium">
+          热键
+        </TabsTrigger>
+        <TabsTrigger value="timing" class="text-sm font-medium">
+          时序与阈值
+        </TabsTrigger>
+      </TabsList>
 
-      <div v-if="!draft" class="text-center py-12 text-muted-foreground">
-        加载中…
-      </div>
+      <TabsContent value="hotkeys">
+        <Card class="rounded-xl shadow-sm">
+          <CardHeader>
+            <CardTitle>全局热键</CardTitle>
+            <CardDescription>任意焦点下生效，保存后立即重注册</CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <HotkeyCapture
+              v-model="draft.send_hotkey"
+              label="发送（宿主机→远程）"
+            />
+            <Separator />
+            <HotkeyCapture
+              v-model="draft.recv_hotkey"
+              label="接收（远程→宿主机）"
+            />
+            <Separator />
+            <HotkeyCapture
+              v-model="draft.stop_hotkey"
+              label="中止（任务运行时生效）"
+            />
+          </CardContent>
+        </Card>
+      </TabsContent>
 
-      <div v-else>
-        <Tabs default-value="hotkeys">
-          <TabsList class="grid grid-cols-2 w-full">
-            <TabsTrigger value="hotkeys">
-              热键
-            </TabsTrigger>
-            <TabsTrigger value="timing">
-              时序与阈值
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="hotkeys">
-            <Card>
-              <CardHeader>
-                <CardTitle>全局热键</CardTitle>
-                <CardDescription>任意焦点下生效，保存后立即重注册</CardDescription>
-              </CardHeader>
-              <CardContent class="space-y-4">
-                <HotkeyCapture
-                  v-model="draft.send_hotkey"
-                  label="发送（宿主机→远程）"
+      <TabsContent value="timing">
+        <Card class="rounded-xl shadow-sm">
+          <CardHeader>
+            <CardTitle>时序与阈值</CardTitle>
+            <CardDescription>键盘逐键时序、二维码接收超时与文本大小上限</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div class="grid grid-cols-2 gap-6">
+              <div class="space-y-1.5">
+                <Label class="text-sm font-medium">逐键间隔 (ms)</Label>
+                <Input
+                  v-model="draft.key_delay_ms"
+                  type="number"
+                  :min="0"
+                  :max="100"
+                  class="h-9 appearance-none text-right"
                 />
-                <Separator />
-                <HotkeyCapture
-                  v-model="draft.recv_hotkey"
-                  label="接收（远程→宿主机）"
+              </div>
+              <div class="space-y-1.5">
+                <Label class="text-sm font-medium">settle 等待 (ms)</Label>
+                <Input
+                  v-model="draft.settle_ms"
+                  type="number"
+                  :min="0"
+                  :max="5000"
+                  class="h-9 appearance-none text-right"
                 />
-                <Separator />
-                <HotkeyCapture
-                  v-model="draft.stop_hotkey"
-                  label="中止（任务运行时生效）"
+              </div>
+              <div class="space-y-1.5">
+                <Label class="text-sm font-medium">二维码接收超时 (秒)</Label>
+                <Input
+                  v-model="draft.receive_timeout_s"
+                  type="number"
+                  :min="5"
+                  :max="3600"
+                  class="h-9 appearance-none text-right"
                 />
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </div>
+              <div class="space-y-1.5">
+                <Label class="text-sm font-medium">文本大小上限 (KB)</Label>
+                <Input
+                  v-model="draft.max_text_kb"
+                  type="number"
+                  :min="1"
+                  :max="10240"
+                  class="h-9 appearance-none text-right"
+                />
+              </div>
+            </div>
 
-          <TabsContent value="timing">
-            <Card>
-              <CardHeader>
-                <CardTitle>时序与阈值</CardTitle>
-                <CardDescription>键盘逐键时序、二维码接收超时与文本大小上限</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div class="grid grid-cols-2 gap-6">
-                  <div class="space-y-2">
-                    <Label>逐键间隔 (ms)</Label>
-                    <Input
-                      v-model="draft.key_delay_ms"
-                      type="number"
-                      :min="0"
-                      :max="100"
-                    />
-                  </div>
-                  <div class="space-y-2">
-                    <Label>settle 等待 (ms)</Label>
-                    <Input
-                      v-model="draft.settle_ms"
-                      type="number"
-                      :min="0"
-                      :max="5000"
-                    />
-                  </div>
-                  <div class="space-y-2">
-                    <Label>二维码接收超时 (秒)</Label>
-                    <Input
-                      v-model="draft.receive_timeout_s"
-                      type="number"
-                      :min="5"
-                      :max="3600"
-                    />
-                  </div>
-                  <div class="space-y-2">
-                    <Label>文本大小上限 (KB)</Label>
-                    <Input
-                      v-model="draft.max_text_kb"
-                      type="number"
-                      :min="1"
-                      :max="10240"
-                    />
-                  </div>
-                </div>
-                <Separator class="my-4" />
-                <label class="flex items-center gap-3 cursor-pointer select-none">
-                  <input
-                    v-model="draft.compress"
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  >
-                  <span>
-                    <span class="text-sm font-medium">启用 zstd 压缩发送（协议 A）</span>
-                    <span class="block text-xs text-muted-foreground">关闭后使用未压缩帧，便于对比传输耗时；仅影响宿主机→远程方向</span>
-                  </span>
-                </label>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+            <Separator class="my-4" />
 
-        <div v-if="errors.length" class="mt-4 space-y-2">
-          <Badge v-for="e in errors" :key="e" variant="destructive">
-            {{ e }}
-          </Badge>
-        </div>
+            <!-- 压缩开关单独一行 -->
+            <div class="flex items-center justify-between rounded-lg border p-3">
+              <div class="space-y-0.5">
+                <Label class="text-sm font-medium">启用 zstd 压缩发送（协议 A）</Label>
+                <p class="text-xs text-muted-foreground">
+                  关闭后使用未压缩帧，便于对比传输耗时
+                </p>
+              </div>
+              <input
+                v-model="draft.compress"
+                type="checkbox"
+                class="h-4 w-4 rounded border-border"
+              >
+            </div>
 
-        <div v-if="savedToast" class="mt-4">
-          <Badge variant="success">
-            ✓ 设置已保存，热键已重注册
-          </Badge>
-        </div>
+            <Separator class="my-4" />
 
-        <div class="mt-6 flex justify-end gap-3">
-          <Button variant="outline" @click="cancel">
-            取消
-          </Button>
-          <Button :disabled="!canSave" @click="save">
-            保存
-          </Button>
-        </div>
-      </div>
+            <div class="flex items-center justify-between rounded-lg border p-3">
+              <div class="space-y-0.5">
+                <Label class="text-sm font-medium">启用按键真实发送</Label>
+                <p class="text-xs text-muted-foreground">
+                  关闭后按键不发送真实字符
+                </p>
+              </div>
+              <input
+                v-model="draft.send_real_keys"
+                type="checkbox"
+                class="h-4 w-4 rounded border-border"
+              >
+            </div>
+
+            <Separator class="my-4" />
+
+            <!-- 进度显示方式 -->
+            <div class="rounded-lg border p-3 space-y-2">
+              <Label class="text-sm font-medium">进度显示方式</Label>
+              <div class="flex gap-2">
+                <button
+                  v-for="opt in [
+                    { value: 'floating', label: '悬浮条' },
+                    { value: 'tray', label: '托盘图标' },
+                    { value: 'both', label: '两者同时' },
+                  ]"
+                  :key="opt.value"
+                  class="px-3 py-1.5 rounded-md text-xs font-medium border transition-colors"
+                  :class="draft.progress_display === opt.value
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border hover:bg-accent'"
+                  @click="draft.progress_display = opt.value as any"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+              <p class="text-xs text-muted-foreground">
+                悬浮条:右上角不抢焦点的进度条;托盘图标:状态栏图标动态变化
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+    </Tabs>
+
+    <div v-if="errors.length" class="space-y-2">
+      <Badge v-for="e in errors" :key="e" variant="destructive">
+        {{ e }}
+      </Badge>
+    </div>
+  </div>
+
+  <!-- Sticky footer:保存状态 + 操作按钮 -->
+  <div class="fixed bottom-0 left-60 right-0 border-t bg-background/95 backdrop-blur px-6 py-4 flex items-center justify-between gap-3">
+    <div>
+      <Badge v-if="savedToast" variant="success">
+        ✓ 设置已保存，热键已重注册
+      </Badge>
+    </div>
+    <div class="flex gap-2">
+      <Button variant="ghost" @click="cancel">
+        取消
+      </Button>
+      <Button :disabled="!canSave" @click="save">
+        保存
+      </Button>
     </div>
   </div>
 </template>

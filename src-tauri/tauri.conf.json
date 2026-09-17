@@ -29,8 +29,8 @@
       {
         "label": "progress",
         "title": "ClipBeam 任务进度",
-        "width": 480,
-        "height": 280,
+        "width": 360,
+        "height": 72,
         "resizable": false,
         "visible": false,
         "hiddenTitle": true,
@@ -39,7 +39,26 @@
         "closable": false,
         "minimizable": false,
         "maximizable": false,
-        "decorations": false
+        "decorations": false,
+        "skipTaskbar": true,
+        "shadow": true
+      },
+      {
+        "label": "standby",
+        "title": "ClipBeam 待命",
+        "width": 320,
+        "height": 250,
+        "resizable": false,
+        "visible": false,
+        "hiddenTitle": false,
+        "url": "index.html#/standby",
+        "alwaysOnTop": true,
+        "closable": false,
+        "minimizable": false,
+        "maximizable": false,
+        "decorations": true,
+        "skipTaskbar": true,
+        "shadow": true
       }
     ],
     "security": {

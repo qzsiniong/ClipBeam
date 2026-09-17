@@ -6,5 +6,6 @@ export const router = createRouter({
     { path: '/', name: 'dashboard', component: () => import('@/pages/Dashboard.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/pages/Settings.vue') },
     { path: '/progress', name: 'progress', component: () => import('@/pages/Progress.vue') },
+    { path: '/standby', name: 'standby', component: () => import('@/pages/Standby.vue') },
   ],
 })

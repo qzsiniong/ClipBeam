@@ -2,17 +2,23 @@
 //! 改为 Tauri 友好的异步结构。业务调用(send/receive/deploy)是同步阻塞的,
 //! 通过 `tokio::task::spawn_blocking` 在独立线程执行;进度/结果通过
 //! `app.emit` 推送到前端。
+//!
+//! 启动流程为两阶段:待命阶段显示 standby 窗口引导用户点击目标窗口,
+//! blur(失焦)触发后才真正开始执行,避免键盘事件注入到错误窗口。
 
 use crate::cancel::CancellationToken;
-use crate::config::Config;
-use crate::{deploy, notify, receive, send, typer};
+use crate::config::{Config, ProgressDisplay};
+use crate::{deploy, notify, receive, send, tray, typer};
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::Mutex;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+use tokio::sync::{Mutex, oneshot};
 
-/// 进度事件节流间隔(毫秒)。Send/Deploy 的逐字符回调频率高,需要节流避免 emit 风暴。
-const PROGRESS_THROTTLE_MS: u64 = 50;
+/// 进度事件节流间隔(毫秒)。1s 更新一次,避免数字跳动;首帧/末帧强制 emit。
+const PROGRESS_THROTTLE_MS: u64 = 1000;
+
+/// 待命窗口超时(秒)。
+const STANDBY_TIMEOUT_SECS: u64 = 10;
 
 /// 任务种类(与原 main.rs 的 TaskKind 等价)。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -21,17 +27,6 @@ pub enum TaskKind {
     Send,
     Recv,
     DeployType,
-}
-
-impl TaskKind {
-    #[allow(dead_code)]
-    fn label(self) -> &'static str {
-        match self {
-            TaskKind::Send => "发送到远程",
-            TaskKind::Recv => "截屏接收",
-            TaskKind::DeployType => "部署接收页",
-        }
-    }
 }
 
 /// 任务最终结果(已转成可展示文案)。
@@ -85,6 +80,7 @@ impl WorkerState {
     }
 
     /// 启动一个后台任务;已有任务在跑时返回错误。
+    /// 两阶段:先显示待命窗口,blur 触发后执行。
     pub async fn start(&self, kind: TaskKind, app: AppHandle) -> Result<(), String> {
         let mut cur = self.current.lock().await;
         if cur.is_some() {
@@ -93,7 +89,7 @@ impl WorkerState {
         let token = CancellationToken::new();
         let cfg = self.config.read().unwrap().clone();
         let cfg_for_busy = cfg.clone();
-        let app_clone = app.clone();
+        let cfg_for_task = cfg.clone();
         let progress = self.progress.clone();
         let current = self.current.clone();
         let config_store = self.config.clone();
@@ -108,20 +104,131 @@ impl WorkerState {
         *self.started_at.write().unwrap() = now_ms;
         *self.progress.write().unwrap() = (0, 0);
 
-        // 显示进度窗口
-        if let Some(w) = app.get_webview_window("progress") {
-            let _ = w.show();
-            let _ = w.set_focus();
+        // 占位 Handle,切忙时热键
+        cur.replace(Handle {
+            kind,
+            token,
+            abort: dummy_abort_handle(),
+        });
+        drop(cur); // 释放锁,允许 cancel 取 take
+
+        let _ = app.emit("worker-started", kind);
+        // 切换为忙时热键:Esc + 当前任务热键
+        if let Err(e) =
+            crate::hotkey::set_mode(&app, &cfg_for_busy, crate::hotkey::HotkeyMode::Busy(kind))
+        {
+            log::error!("切换忙时热键失败: {e}");
+            notify::notify("ClipBeam", "热键切换失败,任务仍在运行");
         }
 
-        let handle = tokio::task::spawn_blocking(move || {
-            let app_for_progress = app_clone.clone();
+        // 接收任务不需要 standby(截屏不注入键盘事件到其他窗口,焦点安全)
+        if kind == TaskKind::Recv {
+            Self::execute_task(
+                app, kind, cfg_for_task, tok, progress,
+                current, config_store, started_at_clone,
+            );
+            return Ok(());
+        }
+
+        // Send/DeployType 走待命阶段:创建 oneshot channel 等 blur 信号
+        let (blur_tx, blur_rx) = oneshot::channel::<()>();
+        let blur_tx = Arc::new(std::sync::Mutex::new(Some(blur_tx)));
+
+        // 显示待命窗口并注册 blur 监听
+        if let Some(w) = app.get_webview_window("standby") {
+            let _ = w.show();
+            let _ = w.set_focus();
+            let blur_tx_clone = blur_tx.clone();
+            w.on_window_event(move |event| {
+                if let WindowEvent::Focused(false) = event {
+                    if let Some(tx) = blur_tx_clone.lock().unwrap().take() {
+                        let _ = tx.send(());
+                    }
+                }
+            });
+        }
+
+        // 发送待命配置给前端(任务类型+触发热键)
+        let hotkey_label = match kind {
+            TaskKind::Send => cfg.send_hotkey.clone(),
+            TaskKind::DeployType => cfg.stop_hotkey.clone(),
+            TaskKind::Recv => unreachable!(),
+        };
+        let _ = app.emit(
+            "standby-config",
+            serde_json::json!({ "kind": kind, "hotkey": hotkey_label }),
+        );
+
+        // spawn 等待 blur 或超时
+        let app_clone = app.clone();
+        tokio::spawn(async move {
+            let timeout = tokio::time::sleep(Duration::from_secs(STANDBY_TIMEOUT_SECS));
+            tokio::pin!(timeout);
+
+            tokio::select! {
+                _ = blur_rx => {
+                    // blur 触发:用户已点击目标窗口,隐藏 standby,开始执行
+                    if let Some(w) = app_clone.get_webview_window("standby") {
+                        let _ = w.hide();
+                    }
+                    let _ = app_clone.emit("standby-start", ());
+                    Self::execute_task(
+                        app_clone, kind, cfg_for_task, tok, progress,
+                        current, config_store, started_at_clone,
+                    );
+                }
+                _ = &mut timeout => {
+                    // 超时取消
+                    if let Some(w) = app_clone.get_webview_window("standby") {
+                        let _ = w.hide();
+                    }
+                    let _ = app_clone.emit("standby-cancel", ());
+                    notify::notify("ClipBeam", "未检测到点击,任务已取消");
+                    if let Ok(mut c) = current.try_lock() {
+                        *c = None;
+                    }
+                    let _ = app_clone.emit("worker-cancelled", kind);
+                    let cfg_fresh = config_store.read().map(|c| c.clone()).unwrap_or_default();
+                    if let Err(e) = crate::hotkey::set_mode(&app_clone, &cfg_fresh, crate::hotkey::HotkeyMode::Idle) {
+                        log::error!("恢复空闲热键失败: {e}");
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    /// 真正执行任务(spawn_blocking)。
+    fn execute_task(
+        app: AppHandle,
+        kind: TaskKind,
+        cfg: Config,
+        token: CancellationToken,
+        progress: Arc<RwLock<(usize, usize)>>,
+        current: Arc<Mutex<Option<Handle>>>,
+        config_store: Arc<RwLock<Config>>,
+        started_at: Arc<RwLock<u64>>,
+    ) {
+        let progress_display = cfg.progress_display;
+        // 显示进度窗口(如果配置 Floating 或 Both),不抢焦点
+        if matches!(progress_display, ProgressDisplay::Floating | ProgressDisplay::Both) {
+            if let Some(w) = app.get_webview_window("progress") {
+                let _ = w.show();
+            }
+        }
+        // 启用托盘忙时状态
+        let _ = tray::set_busy(&app, true, "状态:运行中");
+
+        tokio::task::spawn_blocking(move || {
+            let app_for_progress = app.clone();
             let last_emit: Arc<std::sync::Mutex<u64>> = Arc::new(std::sync::Mutex::new(0));
             let last_emit_clone = last_emit.clone();
             let kind_for_closure = kind;
-            let started = started_at_clone.clone();
+            let started = started_at.clone();
+            let progress_shared = progress.clone();
             let send_progress = move |got, total| {
-                if let Ok(mut p) = progress.write() {
+                if let Ok(mut p) = progress_shared.write() {
                     *p = (got, total);
                 }
                 let now = SystemTime::now()
@@ -129,7 +236,7 @@ impl WorkerState {
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0);
                 let started_at_val = started.read().map_or(0, |v| *v);
-                // 节流:首帧、末帧必发;其余 50ms 内只更新共享状态不 emit
+                // 节流:首帧、末帧必发;其余 1s 内只更新共享状态不 emit
                 let should_emit = {
                     let mut last = last_emit_clone.lock().unwrap();
                     let elapsed = now.saturating_sub(*last);
@@ -151,40 +258,56 @@ impl WorkerState {
                             ts: now,
                         },
                     );
+                    // 更新托盘图标 + 状态行(如果配置 Tray 或 Both)
+                    if matches!(progress_display, ProgressDisplay::Tray | ProgressDisplay::Both) {
+                        let percent = if total > 0 { (got * 100 / total) as u8 } else { 0 };
+                        let status_text = format!("状态:{kind_for_closure:?} {percent}% · {got}/{total}");
+                        let _ = tray::set_status_text(&app_for_progress, &status_text);
+                        let _ = tray::set_tray_progress(&app_for_progress, percent);
+                    }
                 }
             };
-            let outcome = run_worker(kind, cfg, tok, &send_progress);
+            let outcome = run_worker(kind, cfg, token, &send_progress);
+
+            // 组装统计信息(用时、平均速度、已发/总)
+            let (got, total) = progress.read().map(|p| *p).unwrap_or((0, 0));
+            let started_at_val = started_at.read().map_or(0, |v| *v);
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let elapsed_ms = now_ms.saturating_sub(started_at_val);
+            let elapsed_secs = (elapsed_ms / 1000).max(1);
+            let avg_speed = if elapsed_secs > 0 { got / elapsed_secs as usize } else { 0 };
+            let unit = if kind == TaskKind::Recv { "帧" } else { "字符" };
+            let outcome_with_stats = TaskOutcome {
+                title: outcome.title,
+                body: format!(
+                    "{} · 用时 {}s · 平均 {} {}/s · {got}/{total} {}",
+                    outcome.body, elapsed_secs, avg_speed, unit, unit
+                ),
+            };
 
             // 收尾:通知前端 + 系统通知 + 清理 current
-            let _ = app_clone.emit("worker-finished", &outcome);
-            notify::notify(&outcome.title, &outcome.body);
+            let _ = app.emit("worker-finished", &outcome_with_stats);
+            notify::notify(&outcome_with_stats.title, &outcome_with_stats.body);
             if let Ok(mut c) = current.try_lock() {
                 *c = None;
             }
-            // 任务真正结束后恢复空闲热键(释放 Esc);读最新配置,
-            // 兼容任务运行期间在设置页改过热键的情况。
+            // 隐藏进度窗口(由前端控制)
+            // if let Some(w) = app.get_webview_window("progress") {
+            //     let _ = w.hide();
+            // }
+            // 恢复托盘 idle 状态
+            let _ = tray::set_busy(&app, false, "状态:空闲");
+            // 任务真正结束后恢复空闲热键(释放 Esc);读最新配置
             let cfg_fresh = config_store.read().map(|c| c.clone()).unwrap_or_default();
             if let Err(e) =
-                crate::hotkey::set_mode(&app_clone, &cfg_fresh, crate::hotkey::HotkeyMode::Idle)
+                crate::hotkey::set_mode(&app, &cfg_fresh, crate::hotkey::HotkeyMode::Idle)
             {
                 log::error!("恢复空闲热键失败: {e}");
             }
         });
-
-        cur.replace(Handle {
-            kind,
-            token,
-            abort: handle.abort_handle(),
-        });
-        let _ = app.emit("worker-started", kind);
-        // 切换为忙时热键:Esc + 当前任务热键,注销其他触发键(含空闲时不注册的 Esc)。
-        if let Err(e) =
-            crate::hotkey::set_mode(&app, &cfg_for_busy, crate::hotkey::HotkeyMode::Busy(kind))
-        {
-            log::error!("切换忙时热键失败: {e}");
-            notify::notify("ClipBeam", "热键切换失败,任务仍在运行");
-        }
-        Ok(())
     }
 
     /// 中止当前任务(如有)。
@@ -192,7 +315,20 @@ impl WorkerState {
         if let Some(h) = self.current.lock().await.take() {
             h.token.cancel();
             h.abort.abort();
+            // 隐藏待命窗口(如果在待命阶段)
+            if let Some(w) = app.get_webview_window("standby") {
+                let _ = w.hide();
+            }
             let _ = app.emit("worker-cancelled", h.kind);
+            // 恢复托盘 idle 状态
+            let _ = tray::set_busy(app, false, "状态:空闲");
+            // 恢复空闲热键
+            let cfg = self.config.read().unwrap().clone();
+            if let Err(e) =
+                crate::hotkey::set_mode(app, &cfg, crate::hotkey::HotkeyMode::Idle)
+            {
+                log::error!("恢复空闲热键失败: {e}");
+            }
         }
     }
 
@@ -225,7 +361,6 @@ impl WorkerState {
 }
 
 /// 后台线程入口:执行任务并回传进度/结果。
-/// 沿用原 main.rs L266-L327 的 match 分支,仅把进度回调改为 emit。
 fn run_worker<F>(
     kind: TaskKind,
     cfg: Config,
@@ -289,4 +424,9 @@ where
         }
     };
     outcome
+}
+
+/// 创建一个已 abort 的 AbortHandle 占位(待命阶段无实际任务)。
+fn dummy_abort_handle() -> tokio::task::AbortHandle {
+    tokio::task::spawn(async {}).abort_handle()
 }

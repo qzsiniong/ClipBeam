@@ -27,6 +27,7 @@ pub enum TypeResult {
 pub struct Typer {
     delay: Duration,
     cancel: CancellationToken,
+    send_real_keys: bool,
     // macOS: ManuallyDrop 跳过 enigo 的 Drop——其 Drop 内有累积 sleep 逻辑
     //（每次按键 update_wait_time 累加 20ms，长文本 Drop 时会阻塞数秒甚至数分钟）。
     #[cfg(target_os = "macos")]
@@ -42,6 +43,7 @@ impl Typer {
         Ok(Self {
             delay: cfg.key_delay(),
             cancel,
+            send_real_keys: cfg.send_real_keys,
             #[cfg(target_os = "macos")]
             enigo: std::mem::ManuallyDrop::new(enigo),
             #[cfg(not(target_os = "macos"))]
@@ -144,7 +146,7 @@ impl Typer {
             if self.cancel.is_cancelled() {
                 return TypeResult::Cancelled(i);
             }
-            if let Err(e) = self.send_char(c, false) {
+            if let Err(e) = self.send_char(c, !self.send_real_keys) {
                 return TypeResult::Failed(i, format!("键盘事件发送失败: {e}"));
             }
             on_progress(i + 1, total);
