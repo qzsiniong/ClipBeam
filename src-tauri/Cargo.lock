@@ -819,6 +819,8 @@ dependencies = [
  "image",
  "log",
  "mac-notification-sys",
+ "objc2",
+ "objc2-app-kit",
  "png 0.18.1",
  "rqrr",
  "serde",

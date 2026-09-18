@@ -48,6 +48,14 @@ env_logger = "0.11"
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6"
 core-graphics = "0.24"
+# macOS 27+: 设置 NSMenuItem.preferredImageVisibility=.visible,避免菜单图标被默认隐藏
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = [
+  "std",
+  "NSMenu",
+  "NSMenuItem",
+  "NSStatusItem",
+] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winrt-notification = "0.5"
