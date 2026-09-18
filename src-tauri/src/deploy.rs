@@ -11,8 +11,9 @@ use crate::config::Config;
 use crate::protocol::b32_encode_lower;
 use crate::typer::{TypeResult, Typer};
 
-/// 编译期内嵌接收页（单文件）。
-const PAGE: &str = include_str!("../../web/clipbeam.html");
+/// 编译期内嵌接收页（client-vanilla 的 singlefile 构建产物）。
+/// build.rs 会在源文件变更时自动执行 `pnpm --filter @clipbeam/client-vanilla build`。
+const PAGE: &str = include_str!("../../packages/client-vanilla/dist/index.html");
 
 /// 自解压模板。约束：
 /// - 全 ASCII（enigo Unicode 逐字符输入，避免任何多字节字符）；

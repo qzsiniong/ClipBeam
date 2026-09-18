@@ -1,12 +1,14 @@
 import antfu from '@antfu/eslint-config'
 
 const ignores = [
-  '**/dist',
+  '**/dist/**',
+  '**/*.tsbuildinfo',
   'src/components/ui/**',
+  'packages/client/src/components/ui/**',
   'src-tauri/src/**',
   'src-tauri/target/**',
   'src-tauri/gen/**',
-  'web/clipbeam.html',
+  '.trae/**',
   'README.md',
 ]
 

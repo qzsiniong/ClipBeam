@@ -9,7 +9,8 @@
 - **光通道**（远程 → 宿主机）：远程网页循环播放二维码，本机截屏解码。
 
 远程侧只需要一个**单文件、零依赖、可断网 `file://` 打开**的网页
-（[web/clipbeam.html](web/clipbeam.html)），无需安装任何软件。
+（`packages/client-vanilla/dist/index.html`，由 `packages/client-vanilla`
+构建生成，`pnpm build:web` 即可产出），无需安装任何软件。
 
 ---
 
@@ -166,7 +167,8 @@ cargo build --release
    把记事本内容另存为 `clipbeam.html`（UTF-8 编码）→ 浏览器打开；
 2. **剪贴板部署（远程桌面自带剪贴板同步时）**：托盘选
    **「部署接收页（复制到宿主机剪贴板）」** → 在远程粘贴保存为 `.html`；
-3. 直接把仓库里的 [web/clipbeam.html](web/clipbeam.html) 通过任意可用方式传过去。
+3. 执行 `pnpm build:web` 构建接收页，把产物
+   `packages/client-vanilla/dist/index.html` 通过任意可用方式传过去。
 
 ### 4. 双向使用
 
@@ -278,14 +280,23 @@ clipbeam deploy-copy   # 把自解压接收页复制到宿主机剪贴板
 
 要求 Rust stable（edition 2021）+ Node.js 18+ + pnpm。
 
-项目布局：`src-tauri/`（Rust crate + Tauri 配置）+ `frontend/`（Vue 3 + Vite + TS + shadcn-vue）。
-远程端 `web/clipbeam.html` 是独立单文件，不参与构建。
+pnpm workspace 单仓多包布局：
+
+- 仓库根：Tauri 主界面（Vue 3 + Vite + TS + shadcn-vue）
+- `src-tauri/`：Rust crate + Tauri 配置
+- `packages/shared/`：两个 client 共享的协议逻辑（CB1 分帧、base32/CRC、zstd、剪贴板、接收状态机）
+- `packages/client/`：浏览器端 Vue 3 收发页（shadcn-vue + Tailwind v4，开发预览用）
+- `packages/client-vanilla/`：零依赖单文件接收页，构建产物被 Rust `include_str!` 内嵌用于部署
 
 ```bash
-# 安装前端依赖
-cd frontend && pnpm install && cd ..
+# 安装全部 workspace 依赖（仓库根执行一次即可）
+pnpm install
 
-# Debug 开发模式（Tauri 自动启动 Vite dev server + Rust 编译 + 托盘应用）
+# 单独构建远程接收页（产物 packages/client-vanilla/dist/index.html）
+pnpm build:web
+
+# Debug 开发模式（Tauri 自动启动 Vite dev server + Rust 编译 + 托盘应用；
+# cargo 构建时会按需自动构建 client-vanilla，可用 CLIPBEAM_SKIP_WEB_BUILD=1 跳过）
 cd src-tauri && cargo tauri dev
 
 # Release 打包（Tauri 自动：前端构建 + Rust release + bundle）
@@ -371,9 +382,10 @@ CB1.<total>.<index>.<digest>.<data>
 ### 协议 C：自解压引导页
 
 - 模板为全 ASCII、单行 HTML/JS，载荷仅 `[A-Z2-7]`，可安全放入双引号 JS 字符串；
-- 载荷 = 完整接收页 UTF-8 的大写无填充 base32（编译期 `include_str!` 内嵌）；
+- 载荷 = 完整接收页 UTF-8 的大写无填充 base32（编译期 `include_str!` 内嵌
+  `packages/client-vanilla/dist/index.html`）；
 - 远程浏览器打开引导页后，内联脚本做 base32 解码并 `document.write` 替换自身，
-  得到与 [web/clipbeam.html](web/clipbeam.html) 完全一致的接收页。
+  得到与 client-vanilla 构建产物完全一致的接收页。
 
 ---
 

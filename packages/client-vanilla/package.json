@@ -1,0 +1,25 @@
+{
+  "name": "@clipbeam/client-vanilla",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@clipbeam/shared": "workspace:*",
+    "qr-creator": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/html-minifier-terser": "^7.0.2",
+    "@types/node": "^24.13.3",
+    "html-minifier-terser": "^7.2.0",
+    "terser": "^5.51.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vite-plugin-compression2": "^2.5.3",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}

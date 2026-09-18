@@ -1,0 +1,178 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-error: var(--error);
+  --color-error-foreground: var(--error-foreground);
+
+  --animate-qr-pulse: qr-pulse 1.2s ease-in-out infinite;
+  --animate-caret-blink: caret-blink 1s steps(1) infinite;
+
+  @keyframes qr-pulse {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes caret-blink {
+    0%,
+    50% {
+      opacity: 1;
+    }
+    51%,
+    100% {
+      opacity: 0;
+    }
+  }
+}
+
+/* 远程页固定深色主题（html 带 .dark 类），无网络字体依赖 */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
+  --success: oklch(62.706% 0.1699 149.234);
+  --success-foreground: oklch(100% 0.00011 271.152);
+  --warning: oklch(66.583% 0.15738 58.309);
+  --warning-foreground: oklch(100% 0.00011 271.152);
+  --error: oklch(57.707% 0.21516 27.312);
+  --error-foreground: oklch(100% 0.00011 271.152);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+
+    button:not(:disabled),
+    [role='button']:not(:disabled) {
+      cursor: pointer;
+    }
+  }
+}
+
+/* 宿主机键盘注入时的实时打字回显：固定网格、字符原位循环覆盖 */
+.typed {
+  @apply mt-2 hidden overflow-hidden rounded-lg border border-[#2b3550] bg-[#0c1120] px-2.5 py-2 font-mono text-xs leading-[18px] text-sky-400;
+}
+
+.typed.show {
+  @apply block;
+}
+
+.typed-grid {
+  display: grid;
+}
+
+.typed-grid .cell {
+  display: inline-block;
+  width: 1ch;
+  height: 18px;
+  line-height: 18px;
+  white-space: pre;
+}
+
+/* 最新落子格：原位覆盖并短暂高亮（:key 变化驱动元素重建，重放 pop 动画） */
+.typed-grid .cell.fresh {
+  color: #7fd1ff;
+  animation: live-pop 0.32s ease-out;
+}
+
+.typed-line2 {
+  @apply text-[#6b7591];
+}
+
+@keyframes live-pop {
+  0% {
+    color: #d6f1ff;
+    transform: translateY(-2px);
+    text-shadow: 0 0 9px rgb(127 209 255 / 95%);
+  }
+  100% {
+    color: rgb(125 209 255);
+    transform: none;
+    text-shadow: none;
+  }
+}
+
+.typed .cursor {
+  @apply ml-px animate-caret-blink;
+}
+
+/* 出站二维码全屏遮罩：几何参数锁死（78vmin 白卡），保证宿主机截屏识别率 */
+.qr-overlay {
+  @apply fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-3.5;
+  background: rgb(8 11 22 / 82%);
+}
+
+.qr-card {
+  @apply block rounded-[14px] bg-white p-4;
+  width: min(78vmin, 820px);
+  height: min(78vmin, 820px);
+}
+
+.qr-card > * {
+  @apply block h-full w-full;
+}
+
+.qr-svg svg {
+  width: 100%;
+  height: 100%;
+  shape-rendering: crispEdges;
+}
