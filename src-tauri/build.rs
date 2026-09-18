@@ -92,8 +92,8 @@ fn render(scale: i32) -> Vec<u8> {
     buf
 }
 
-/// 把 RGBA 缓冲写成 PNG 文件。
-fn write_png(path: &std::path::Path, buf: &[u8], size: u32) {
+/// 把 RGBA 缓冲编码为 PNG 字节。
+fn encode_png(buf: &[u8], size: u32) -> Vec<u8> {
     let mut png_bytes = Vec::new();
     {
         use png::Encoder;
@@ -103,6 +103,20 @@ fn write_png(path: &std::path::Path, buf: &[u8], size: u32) {
         enc.set_depth(png::BitDepth::Eight);
         let mut writer = enc.write_header().unwrap();
         writer.write_image_data(buf).unwrap();
+    }
+    png_bytes
+}
+
+/// 内容与现有文件一致时跳过写入。
+/// 关键:build.rs 每次运行都会执行,若无条件 fs::write 会刷新图标 mtime,
+/// tauri dev 的文件监视器检测到 icons/ 变化 → 触发重建 → build.rs 再写 →
+/// 无限重建循环。内容未变时不更新 mtime 即可断开循环。
+fn write_png_if_changed(path: &std::path::Path, buf: &[u8], size: u32) {
+    let png_bytes = encode_png(buf, size);
+    if let Ok(existing) = std::fs::read(path) {
+        if existing == png_bytes {
+            return;
+        }
     }
     std::fs::write(path, &png_bytes).unwrap();
 }
@@ -120,7 +134,7 @@ fn main() {
     let icons_dir = manifest_dir.join("icons");
     std::fs::create_dir_all(&icons_dir).unwrap();
 
-    write_png(&icons_dir.join("32x32.png"), &render(1), (BASE * 1) as u32);
-    write_png(&icons_dir.join("128x128.png"), &render(2), (BASE * 2) as u32);
-    write_png(&icons_dir.join("icon.png"), &render(16), (BASE * 16) as u32);
+    write_png_if_changed(&icons_dir.join("32x32.png"), &render(1), (BASE * 1) as u32);
+    write_png_if_changed(&icons_dir.join("128x128.png"), &render(2), (BASE * 2) as u32);
+    write_png_if_changed(&icons_dir.join("icon.png"), &render(16), (BASE * 16) as u32);
 }
