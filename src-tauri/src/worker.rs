@@ -229,6 +229,10 @@ impl WorkerState {
         // 启用托盘忙时状态
         let _ = tray::set_busy(&app, true, "状态:运行中");
 
+        // 自动弹出托盘菜单
+        // 暂时不使用异步弹出,因为会阻塞任务启动,导致任务启动失败
+        // let _ = tray::show_menu(&app);
+
         tokio::task::spawn_blocking(move || {
             let app_for_progress = app.clone();
             let last_emit: Arc<std::sync::Mutex<u64>> = Arc::new(std::sync::Mutex::new(0));

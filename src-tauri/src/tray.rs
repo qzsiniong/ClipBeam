@@ -118,6 +118,20 @@ pub fn set_busy(app: &AppHandle, busy: bool, status: &str) -> tauri::Result<()> 
     Ok(())
 }
 
+/// 显示托盘菜单。
+pub fn _show_menu(app: &AppHandle) -> tauri::Result<()> {
+    let app_clone = app.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Some(tray) = app_clone.tray_by_id("main") {
+            let _ = tray.with_inner_tray_icon(|inner| {
+                inner.show_menu();
+            });
+        }
+    });
+
+    Ok(())
+}
+
 /// 更新状态行进度文本(供 worker send_progress 调用)。
 pub fn set_status_text(app: &AppHandle, text: &str) -> tauri::Result<()> {
     let items = app.state::<TrayItems>();
