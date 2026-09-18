@@ -6,6 +6,7 @@ const ignores = [
   'src-tauri/src/**',
   'src-tauri/target/**',
   'src-tauri/gen/**',
+  'web/clipbeam.html',
   'README.md',
 ]
 
