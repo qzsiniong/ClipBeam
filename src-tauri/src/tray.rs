@@ -13,6 +13,7 @@ use tauri::{
 };
 
 pub const M_STATUS: &str = "status";
+pub const M_SEND_RAW: &str = "send_raw";
 pub const M_SEND: &str = "send";
 pub const M_RECV: &str = "recv";
 pub const M_DEPLOY_TYPE: &str = "deploy_type";
@@ -31,6 +32,10 @@ pub struct TrayItems {
 /// 构建托盘菜单。cfg 用于设置菜单项 accelerator(热键)。
 pub fn build(app: &App, cfg: &Config) -> tauri::Result<()> {
     // 热键作为 accelerator 传入,macOS 自动浅色右对齐显示;图标由 IconMenuItemBuilder 承载
+    let send_raw = IconMenuItemBuilder::with_id(M_SEND_RAW, "发送本机剪贴板(原样)")
+        .accelerator(cfg.send_raw_hotkey.as_str())
+        .icon(icon_send())
+        .build(app)?;
     let send = IconMenuItemBuilder::with_id(M_SEND, "发送本机剪贴板 → 远程")
         .accelerator(cfg.send_hotkey.as_str())
         .icon(icon_send())
@@ -62,6 +67,8 @@ pub fn build(app: &App, cfg: &Config) -> tauri::Result<()> {
 
     let menu = MenuBuilder::new(app)
         .item(&status)
+        .separator()
+        .item(&send_raw)
         .separator()
         .item(&send)
         .item(&recv)

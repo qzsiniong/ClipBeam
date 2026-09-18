@@ -126,6 +126,11 @@ async function cancel() {
           </CardHeader>
           <CardContent class="space-y-4">
             <HotkeyCapture
+              v-model="draft.send_raw_hotkey"
+              label="发送（原样）"
+            />
+            <Separator />
+            <HotkeyCapture
               v-model="draft.send_hotkey"
               label="发送（宿主机→远程）"
             />

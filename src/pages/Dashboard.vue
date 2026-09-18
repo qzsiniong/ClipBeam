@@ -26,6 +26,16 @@ let tickTimer: number | null = null
 
 const unlistens: UnlistenFn[] = []
 
+async function startSendRaw() {
+  lastError.value = null
+  try {
+    await invoke('start_send_raw')
+  }
+  catch (e) {
+    lastError.value = String(e)
+  }
+}
+
 async function startSend() {
   lastError.value = null
   try {
@@ -221,6 +231,9 @@ const speedUnit = computed(() => (kind.value === 'recv' ? '帧/秒' : '字符/�
         </div>
       </CardContent>
       <CardFooter class="flex flex-wrap gap-2">
+        <Button :disabled="busy" @click="startSendRaw">
+          发送到远程(原样)
+        </Button>
         <Button :disabled="busy" @click="startSend">
           发送到远程
         </Button>

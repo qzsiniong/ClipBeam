@@ -24,6 +24,7 @@ pub enum SendReport {
 /// `on_progress(sent, total)` 在每个字符发送后触发。
 pub fn run_once(
     cfg: &Config,
+    raw: bool,
     cancel: &CancellationToken,
     settle: bool,
     mut on_progress: impl FnMut(usize, usize),
@@ -53,11 +54,16 @@ pub fn run_once(
     }
 
     // 2. 组帧（按配置决定是否启用 zstd 压缩）
-    let frame = if cfg.compress {
-        crate::protocol::build_keyboard_frame_compressed(&text)
+    let frame = if raw {
+        text.to_string()
     } else {
-        crate::protocol::build_keyboard_frame(&text)
+        if cfg.compress {
+            crate::protocol::build_keyboard_frame_compressed(&text)
+        } else {
+            crate::protocol::build_keyboard_frame(&text)
+        }
     };
+
     let frame_chars = frame.chars().count();
 
     // 3. 等待修饰键抬起（可被中止）

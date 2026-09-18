@@ -5,6 +5,7 @@ import { ref } from 'vue'
 export type ProgressDisplay = 'floating' | 'tray' | 'both'
 
 export interface Config {
+  send_raw_hotkey: string
   send_hotkey: string
   recv_hotkey: string
   stop_hotkey: string

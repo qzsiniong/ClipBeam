@@ -24,6 +24,7 @@ const STANDBY_TIMEOUT_SECS: u64 = 10;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskKind {
+    SendRaw,
     Send,
     Recv,
     DeployType,
@@ -156,6 +157,7 @@ impl WorkerState {
 
         // 发送待命配置给前端(任务类型+触发热键)
         let hotkey_label = match kind {
+            TaskKind::SendRaw => cfg.send_raw_hotkey.clone(),
             TaskKind::Send => cfg.send_hotkey.clone(),
             TaskKind::DeployType => cfg.stop_hotkey.clone(),
             TaskKind::Recv => unreachable!(),
@@ -398,7 +400,24 @@ where
     F: Fn(usize, usize),
 {
     let outcome = match kind {
-        TaskKind::Send => match send::run_once(&cfg, &token, true, |g, t| send_progress(g, t)) {
+        TaskKind::SendRaw => match send::run_once(&cfg, true, &token, true, |g, t| send_progress(g, t)) {
+            send::SendReport::Done {
+                frame_chars,
+                text_bytes,
+            } => TaskOutcome {
+                title: "✓ 已发送到远程".into(),
+                body: format!("{text_bytes} 字节,共敲入 {frame_chars} 个字符"),
+            },
+            send::SendReport::Cancelled { sent } => TaskOutcome {
+                title: "发送已中止".into(),
+                body: format!("约 {sent} 个字符可能已落入当前焦点窗口,请人工检查"),
+            },
+            send::SendReport::Error(e) => TaskOutcome {
+                title: "发送失败".into(),
+                body: e,
+            },
+        },
+        TaskKind::Send => match send::run_once(&cfg, false, &token, true, |g, t| send_progress(g, t)) {
             send::SendReport::Done {
                 frame_chars,
                 text_bytes,

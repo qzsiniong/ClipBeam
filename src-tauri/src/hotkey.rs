@@ -31,6 +31,9 @@ pub fn set_mode(app: &AppHandle, cfg: &Config, mode: HotkeyMode) -> GsResult<()>
         HotkeyMode::Busy(kind) => {
             gs.on_shortcut(cfg.stop_hotkey.as_str(), on_cancel)?;
             match kind {
+                worker::TaskKind::SendRaw => {
+                    gs.on_shortcut(cfg.send_raw_hotkey.as_str(), on_cancel)?;
+                }
                 worker::TaskKind::Send => {
                     gs.on_shortcut(cfg.send_hotkey.as_str(), on_cancel)?;
                 }

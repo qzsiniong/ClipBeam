@@ -26,6 +26,8 @@ impl Default for ProgressDisplay {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
+    /// 无协议发送（原样发送）热键。
+    pub send_raw_hotkey: String,
     /// 发送（宿主机→远程）热键。
     pub send_hotkey: String,
     /// 接收（远程→宿主机）热键。
@@ -49,12 +51,20 @@ pub struct Config {
 }
 
 #[cfg(target_os = "macos")]
+fn default_send_raw_hotkey() -> String {
+    "Cmd+Shift+L".into()
+}
+#[cfg(target_os = "macos")]
 fn default_send_hotkey() -> String {
     "Cmd+Shift+K".into()
 }
 #[cfg(target_os = "macos")]
 fn default_recv_hotkey() -> String {
     "Cmd+Shift+J".into()
+}
+#[cfg(not(target_os = "macos"))]
+fn default_send_raw_hotkey() -> String {
+    "Ctrl+Shift+L".into()
 }
 #[cfg(not(target_os = "macos"))]
 fn default_send_hotkey() -> String {
@@ -94,6 +104,7 @@ fn has_modifier(spec: &str) -> bool {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            send_raw_hotkey: default_send_raw_hotkey(),
             send_hotkey: default_send_hotkey(),
             recv_hotkey: default_recv_hotkey(),
             stop_hotkey: "Esc".into(),

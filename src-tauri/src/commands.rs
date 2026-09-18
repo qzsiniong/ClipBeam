@@ -35,6 +35,11 @@ pub async fn save_config(
     crate::notify::notify("ClipBeam", "设置已保存,热键已重注册");
     Ok(())
 }
+/// 启动发送任务(无协议,原样发送)。
+#[tauri::command]
+pub async fn start_send_raw(app: AppHandle, state: State<'_, WorkerState>) -> Result<(), String> {
+    state.start(TaskKind::SendRaw, app).await
+}
 
 /// 启动发送任务(协议 A)。
 #[tauri::command]

@@ -53,7 +53,7 @@ pub fn run_cli(cmd: Command) {
     match cmd {
         Command::SendOnce => {
             eprintln!("请确认焦点已在远程接收页,0.2 秒后开始发送(Ctrl-C 可强杀进程)……");
-            match send::run_once(&cfg, &token, true, |_, _| {}) {
+            match send::run_once(&cfg, false, &token, true, |_, _| {}) {
                 send::SendReport::Done {
                     frame_chars,
                     text_bytes,
@@ -146,6 +146,19 @@ pub fn run() {
             let id = event.id().as_ref();
             match id {
                 tray::M_QUIT => app.exit(0),
+                tray::M_SEND_RAW => {
+                    let app_clone = app.clone();
+                    spawn(async move {
+                        if let Err(e) = commands::start_send_raw(
+                            app_clone.clone(),
+                            app_clone.state::<worker::WorkerState>(),
+                        )
+                        .await
+                        {
+                            crate::notify::notify("ClipBeam", &e);
+                        }
+                    });
+                }
                 tray::M_DEPLOY_TYPE => {
                     let app_clone = app.clone();
                     spawn(async move {
@@ -211,6 +224,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
             commands::save_config,
+            commands::start_send_raw,
             commands::start_send,
             commands::start_recv,
             commands::start_deploy_type,
