@@ -9,6 +9,10 @@ export default defineConfig({
     alias: { '@': path.resolve(__dirname, './src') },
   },
   // Tauri dev server 端口固定为 5173(对应 tauri.conf.json devUrl)
-  server: { port: 5173, strictPort: true },
+  server: {
+    port: 5173,
+    strictPort: true,
+    watch: { ignored: ['src-tauri/**'] },
+  },
   clearScreen: false,
 })

@@ -20,9 +20,9 @@ if ! command -v pnpm &>/dev/null; then
   exit 1
 fi
 
-if [[ ! -d "frontend/node_modules" ]]; then
+if [[ ! -d "node_modules" ]]; then
   echo "==> 安装 frontend 依赖"
-  (cd frontend && pnpm install)
+  (pnpm install)
 fi
 
 # 检查 tauri-cli（cargo 子命令）

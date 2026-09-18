@@ -4,16 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.clipbeam.desktop",
   "build": {
-    "beforeDevCommand": {
-      "script": "pnpm dev",
-      "cwd": "../frontend"
-    },
+    "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": {
-      "script": "pnpm build",
-      "cwd": "../frontend"
-    },
-    "frontendDist": "../frontend/dist"
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [

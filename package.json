@@ -30,6 +30,7 @@
   "devDependencies": {
     "@antfu/eslint-config": "^9.5.1",
     "@tailwindcss/vite": "^4",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22",
     "@vitejs/plugin-vue": "^5",
     "eslint": "^10.9.1",
