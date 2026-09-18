@@ -8,7 +8,7 @@ use arboard::Clipboard;
 
 use crate::cancel::CancellationToken;
 use crate::config::Config;
-use crate::protocol::{b32_encode_lower};
+use crate::protocol::b32_encode_lower;
 use crate::typer::{TypeResult, Typer};
 
 /// 编译期内嵌接收页（单文件）。

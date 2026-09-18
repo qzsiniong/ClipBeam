@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Config } from '@/stores/config'
+import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { computed, onMounted, ref } from 'vue'
@@ -18,6 +19,38 @@ const draft = ref<Config | null>(null)
 const errors = ref<string[]>([])
 const savedToast = ref(false)
 
+// 开机自启动:系统登录项为唯一数据源,切换立即生效,独立于草稿/保存按钮
+const autostart = ref(false)
+const autostartLoading = ref(false)
+const autostartError = ref<string | null>(null)
+
+async function loadAutostart() {
+  autostartLoading.value = true
+  autostartError.value = null
+  try {
+    autostart.value = await invoke<boolean>('get_autostart')
+  }
+  catch (e) {
+    autostartError.value = String(e)
+  }
+  finally {
+    autostartLoading.value = false
+  }
+}
+
+async function toggleAutostart(value: boolean) {
+  const previous = autostart.value
+  autostart.value = value
+  autostartError.value = null
+  try {
+    await invoke('set_autostart', { enabled: value })
+  }
+  catch (e) {
+    autostart.value = previous
+    autostartError.value = String(e)
+  }
+}
+
 onMounted(async () => {
   await store.load()
   draft.value = { ...store.config! }
@@ -27,6 +60,7 @@ onMounted(async () => {
       savedToast.value = false
     }, 2000)
   })
+  await loadAutostart()
 })
 
 const canSave = computed(() => {
@@ -72,12 +106,15 @@ async function cancel() {
 <template>
   <div class="flex flex-col gap-6 pb-20">
     <Tabs v-if="draft" default-value="hotkeys">
-      <TabsList class="grid grid-cols-2 w-full h-9">
+      <TabsList class="grid grid-cols-3 w-full h-9">
         <TabsTrigger value="hotkeys" class="text-sm font-medium">
           热键
         </TabsTrigger>
         <TabsTrigger value="timing" class="text-sm font-medium">
           时序与阈值
+        </TabsTrigger>
+        <TabsTrigger value="general" class="text-sm font-medium">
+          通用
         </TabsTrigger>
       </TabsList>
 
@@ -215,6 +252,35 @@ async function cancel() {
                 悬浮条:右上角不抢焦点的进度条;托盘图标:状态栏图标动态变化
               </p>
             </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="general">
+        <Card class="rounded-xl shadow-sm">
+          <CardHeader>
+            <CardTitle>启动</CardTitle>
+            <CardDescription>系统登录时的启动行为</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div class="flex items-center justify-between rounded-lg border p-3">
+              <div class="space-y-0.5">
+                <Label class="text-sm font-medium">开机时自动启动 ClipBeam</Label>
+                <p class="text-xs text-muted-foreground">
+                  登录系统后自动在菜单栏启动，更改立即生效
+                </p>
+              </div>
+              <input
+                :checked="autostart"
+                type="checkbox"
+                class="h-4 w-4 rounded border-border"
+                :disabled="autostartLoading"
+                @change="toggleAutostart(($event.target as HTMLInputElement).checked)"
+              >
+            </div>
+            <p v-if="autostartError" class="mt-2 text-xs text-destructive">
+              {{ autostartError }}
+            </p>
           </CardContent>
         </Card>
       </TabsContent>

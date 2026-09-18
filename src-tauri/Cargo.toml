@@ -52,6 +52,9 @@ core-graphics = "0.24"
 [target.'cfg(target_os = "windows")'.dependencies]
 winrt-notification = "0.5"
 
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-autostart = "2"
+
 [dev-dependencies]
 image = { version = "0.25", features = [
   "gif",

@@ -21,7 +21,7 @@ mod worker;
 
 use clap::{Parser, Subcommand};
 use config::Config;
-use tauri::{Emitter, Manager, async_runtime::spawn};
+use tauri::{async_runtime::spawn, Emitter, Manager};
 
 // ---------------------------------------------------------------------------
 // CLI 子命令(联调用)
@@ -125,6 +125,7 @@ pub fn run_cli(cmd: Command) {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -165,9 +166,7 @@ pub fn run() {
                                 "ClipBeam",
                                 &format!("自解压接收页({chars} 字符)已复制到宿主机剪贴板"),
                             ),
-                            Err(e) => {
-                                crate::notify::notify("ClipBeam", &format!("复制失败: {e}"))
-                            }
+                            Err(e) => crate::notify::notify("ClipBeam", &format!("复制失败: {e}")),
                         }
                     });
                 }
@@ -199,7 +198,7 @@ pub fn run() {
                 }
                 _ => {
                     let _ = app.emit("tray-menu", id);
-                },
+                }
             }
         })
         .on_window_event(|window, event| {
@@ -219,6 +218,8 @@ pub fn run() {
             commands::cancel_task,
             commands::get_task_status,
             commands::capture_hotkey,
+            commands::get_autostart,
+            commands::set_autostart,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 应用启动失败");

@@ -135,6 +135,10 @@ fn main() {
     std::fs::create_dir_all(&icons_dir).unwrap();
 
     write_png_if_changed(&icons_dir.join("32x32.png"), &render(1), (BASE * 1) as u32);
-    write_png_if_changed(&icons_dir.join("128x128.png"), &render(2), (BASE * 2) as u32);
+    write_png_if_changed(
+        &icons_dir.join("128x128.png"),
+        &render(2),
+        (BASE * 2) as u32,
+    );
     write_png_if_changed(&icons_dir.join("icon.png"), &render(16), (BASE * 16) as u32);
 }

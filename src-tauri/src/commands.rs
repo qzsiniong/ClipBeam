@@ -80,6 +80,32 @@ pub async fn get_task_status(state: State<'_, WorkerState>) -> Result<Status, St
 /// 前端捕获热键后,把物理键名 + 修饰键传给后端,后端转成规范字符串并校验。
 #[tauri::command]
 pub async fn capture_hotkey(code: String, mods: HotkeyMods) -> Result<String, String> {
-    crate::hotkey::spec_from_frontend(&code, &mods)
-        .ok_or_else(|| "无法识别该组合键".into())
+    crate::hotkey::spec_from_frontend(&code, &mods).ok_or_else(|| "无法识别该组合键".into())
+}
+
+/// 查询开机自启动状态(以系统登录项/注册表的实际状态为准)。
+#[tauri::command]
+pub async fn get_autostart(app: AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|e| format!("读取自启动状态失败: {e}"))
+}
+
+/// 立即启用/关闭开机自启动(写入 macOS LoginAgent / Windows 注册表 / Linux desktop entry)。
+#[tauri::command]
+pub async fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    let current = manager.is_enabled().unwrap_or(false);
+    if enabled && !current {
+        manager
+            .enable()
+            .map_err(|e| format!("启用自启动失败: {e}"))?;
+    } else if !enabled && current {
+        manager
+            .disable()
+            .map_err(|e| format!("关闭自启动失败: {e}"))?;
+    }
+    Ok(())
 }

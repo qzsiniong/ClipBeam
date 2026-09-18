@@ -33,11 +33,17 @@ pub struct TrayItems {
 pub fn build(app: &App, cfg: &Config) -> tauri::Result<()> {
     // 热键作为 accelerator 传入,macOS 自动浅色右对齐显示;label 只保留功能描述 + emoji
     let send = MenuItem::with_id(
-        app, M_SEND, "📤 发送本机剪贴板 → 远程", true,
+        app,
+        M_SEND,
+        "📤 发送本机剪贴板 → 远程",
+        true,
         Some(cfg.send_hotkey.clone()),
     )?;
     let recv = MenuItem::with_id(
-        app, M_RECV, "📥 截屏接收远程二维码", true,
+        app,
+        M_RECV,
+        "📥 截屏接收远程二维码",
+        true,
         Some(cfg.recv_hotkey.clone()),
     )?;
 

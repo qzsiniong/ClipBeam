@@ -12,7 +12,7 @@ use crate::{deploy, notify, receive, send, tray, typer};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 
 /// 进度事件节流间隔(毫秒)。1s 更新一次,避免数字跳动;首帧/末帧强制 emit。
 const PROGRESS_THROTTLE_MS: u64 = 1000;
@@ -124,8 +124,14 @@ impl WorkerState {
         // 接收任务不需要 standby(截屏不注入键盘事件到其他窗口,焦点安全)
         if kind == TaskKind::Recv {
             Self::execute_task(
-                app, kind, cfg_for_task, tok, progress,
-                current, config_store, started_at_clone,
+                app,
+                kind,
+                cfg_for_task,
+                tok,
+                progress,
+                current,
+                config_store,
+                started_at_clone,
             );
             return Ok(());
         }
@@ -212,7 +218,10 @@ impl WorkerState {
     ) {
         let progress_display = cfg.progress_display;
         // 显示进度窗口(如果配置 Floating 或 Both),不抢焦点
-        if matches!(progress_display, ProgressDisplay::Floating | ProgressDisplay::Both) {
+        if matches!(
+            progress_display,
+            ProgressDisplay::Floating | ProgressDisplay::Both
+        ) {
             if let Some(w) = app.get_webview_window("progress") {
                 let _ = w.show();
             }
@@ -259,9 +268,17 @@ impl WorkerState {
                         },
                     );
                     // 更新托盘图标 + 状态行(如果配置 Tray 或 Both)
-                    if matches!(progress_display, ProgressDisplay::Tray | ProgressDisplay::Both) {
-                        let percent = if total > 0 { (got * 100 / total) as u8 } else { 0 };
-                        let status_text = format!("状态:{kind_for_closure:?} {percent}% · {got}/{total}");
+                    if matches!(
+                        progress_display,
+                        ProgressDisplay::Tray | ProgressDisplay::Both
+                    ) {
+                        let percent = if total > 0 {
+                            (got * 100 / total) as u8
+                        } else {
+                            0
+                        };
+                        let status_text =
+                            format!("状态:{kind_for_closure:?} {percent}% · {got}/{total}");
                         let _ = tray::set_status_text(&app_for_progress, &status_text);
                         let _ = tray::set_tray_progress(&app_for_progress, percent);
                     }
@@ -278,8 +295,16 @@ impl WorkerState {
                 .unwrap_or(0);
             let elapsed_ms = now_ms.saturating_sub(started_at_val);
             let elapsed_secs = (elapsed_ms / 1000).max(1);
-            let avg_speed = if elapsed_secs > 0 { got / elapsed_secs as usize } else { 0 };
-            let unit = if kind == TaskKind::Recv { "帧" } else { "字符" };
+            let avg_speed = if elapsed_secs > 0 {
+                got / elapsed_secs as usize
+            } else {
+                0
+            };
+            let unit = if kind == TaskKind::Recv {
+                "帧"
+            } else {
+                "字符"
+            };
             let outcome_with_stats = TaskOutcome {
                 title: outcome.title,
                 body: format!(
@@ -324,9 +349,7 @@ impl WorkerState {
             let _ = tray::set_busy(app, false, "状态:空闲");
             // 恢复空闲热键
             let cfg = self.config.read().unwrap().clone();
-            if let Err(e) =
-                crate::hotkey::set_mode(app, &cfg, crate::hotkey::HotkeyMode::Idle)
-            {
+            if let Err(e) = crate::hotkey::set_mode(app, &cfg, crate::hotkey::HotkeyMode::Idle) {
                 log::error!("恢复空闲热键失败: {e}");
             }
         }

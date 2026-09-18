@@ -5,7 +5,7 @@
 //! 启动失败通过系统通知反馈。
 
 use crate::{commands, config::Config, notify, worker};
-use tauri::{AppHandle, Manager, async_runtime::spawn};
+use tauri::{async_runtime::spawn, AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
 type GsResult<T> = Result<T, tauri_plugin_global_shortcut::Error>;
