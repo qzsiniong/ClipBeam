@@ -144,6 +144,43 @@
       }
     }
 
+    /* 宿主机键盘注入时的实时打字回显：单行终端风、尾部窗口 */
+    .typed {
+      display: none;
+      margin-top: 8px;
+      padding: 8px 10px;
+      background: #0c1120;
+      border: 1px solid #2b3550;
+      border-radius: 8px;
+      font: 12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      color: var(--acc);
+      white-space: pre;
+      overflow: hidden;
+      min-height: 20px
+    }
+
+    .typed.show {
+      display: block
+    }
+
+    .typed .cursor {
+      margin-left: 1px;
+      animation: blink 1s steps(1) infinite
+    }
+
+    @keyframes blink {
+
+      0%,
+      50% {
+        opacity: 1
+      }
+
+      51%,
+      100% {
+        opacity: 0
+      }
+    }
+
     textarea {
       width: 100%;
       min-height: 84px;
@@ -243,6 +280,8 @@
       <label><input type="checkbox" id="pauseChk"> 暂停接收（在页面输入框内打字时建议勾选）</label>
       <div class="bar" id="inBar"><i></i></div>
       <div class="status" id="inStatus">等待接收…</div>
+      <div class="typed" id="typed" aria-label="键盘输入实时回显"><span id="typedText"></span><span class="cursor"
+          aria-hidden="true">▋</span></div>
       <textarea id="manualCopy" style="display:none"></textarea>
       <div class="row" id="manualRow" style="display:none"><button class="sec" id="copyBtn">复制上述文本</button></div>
     </div>
@@ -324,18 +363,24 @@
        帧: 0 <magic> 0 <payload> 0 <digest> 1
        magic = "clipbeam1"（v1 未压缩）或 "clipbeam2"（v2 zstd 压缩）
        状态 idle → magic → payload → digest                       */
-    var MAGIC_PREFIX = "clipbeam", IDLE_TIMEOUT = 10000;
+    var MAGIC_PREFIX = "clipbeam", IDLE_TIMEOUT = 30000;
     var kbState = "idle", magicBuf = "", payloadBuf = "", digestBuf = "", lastEvt = 0, frameVersion = 1;
     var pauseChk = $("pauseChk"), inStatus = $("inStatus"), inBar = $("inBar"),
-      manualCopy = $("manualCopy"), manualRow = $("manualRow");
+      manualCopy = $("manualCopy"), manualRow = $("manualRow"),
+      typedBox = $("typed"), typedText = $("typedText");
+
+    /* 打字效果：接收期间实时回显字符流尾部，复位即隐藏 */
+    var TYPE_TAIL = 96;
+    function renderTyped(s) { typedText.textContent = s; typedBox.classList.add("show"); }
+    function clearTyped() { typedBox.classList.remove("show"); typedText.textContent = ""; }
 
     function setIn(cls, msg) { inStatus.className = "status " + cls; inStatus.textContent = msg; }
     function barOn(on) { inBar.style.display = on ? "block" : "none"; }
-    function resetKb() { kbState = "idle"; magicBuf = payloadBuf = digestBuf = ""; barOn(false); }
+    function resetKb() { kbState = "idle"; magicBuf = payloadBuf = digestBuf = ""; barOn(false); clearTyped(); }
 
     setInterval(function () {
       if (kbState !== "idle" && Date.now() - lastEvt > IDLE_TIMEOUT) {
-        resetKb(); setIn("", "等待接收…（10 秒无输入，已复位）");
+        resetKb(); setIn("", "等待接收…（30 秒无输入，已复位）");
       }
     }, 500);
 
@@ -343,36 +388,39 @@
       if (e.repeat) return;
       var t = e.target;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+
       if (pauseChk.checked) { resetKb(); return; }
       var k = e.key, isData = /^[a-z2-7]$/.test(k);
       lastEvt = Date.now();
 
       if (kbState === "idle") {
-        if (k === "0") { kbState = "magic"; magicBuf = ""; }
+        if (k === "0") { kbState = "magic"; magicBuf = ""; renderTyped(""); }
         return; // 未成帧前不吞正常输入
       }
       e.preventDefault(); // 魔术头之后全部吞掉
       if (kbState === "magic") {
         // 前 8 字符匹配 "clipbeam" 前缀
         if (magicBuf.length < MAGIC_PREFIX.length) {
-          if (k === MAGIC_PREFIX.charAt(magicBuf.length)) magicBuf += k;
+          if (k === MAGIC_PREFIX.charAt(magicBuf.length)) { magicBuf += k; renderTyped(magicBuf); }
           else resetKb();
         } else if (magicBuf.length === MAGIC_PREFIX.length) {
           // 第 9 字符为版本号：1（未压缩）或 2（zstd 压缩）
-          if (k === "1" || k === "2") { frameVersion = +k; magicBuf += k; }
+          if (k === "1" || k === "2") { frameVersion = +k; magicBuf += k; renderTyped(magicBuf); }
           else resetKb();
         } else if (k === "0") {
           // 字段分隔符：进入 payload 阶段
-          kbState = "payload"; payloadBuf = ""; setIn("run", "正在接收…(v" + frameVersion + ")"); barOn(true);
+          kbState = "payload"; payloadBuf = ""; renderTyped("");
+          setIn("run", "正在接收…(v" + frameVersion + ")"); barOn(true);
         } else resetKb();
       } else if (kbState === "payload") {
         if (isData) {
           payloadBuf += k;
+          renderTyped(payloadBuf.slice(-TYPE_TAIL));
           if (payloadBuf.length % 128 === 0) setIn("run", "正在接收… " + payloadBuf.length + " 字符");
         } else if (k === "0") { kbState = "digest"; digestBuf = ""; }
         else { resetKb(); setIn("", "等待接收…（含非法字符，已复位）"); }
       } else if (kbState === "digest") {
-        if (isData) digestBuf += k;
+        if (isData) { digestBuf += k; renderTyped(payloadBuf.slice(-TYPE_TAIL) + " · " + digestBuf); }
         else if (k === "1") { var p = payloadBuf, d = digestBuf, v = frameVersion; resetKb(); finalizeFrame(p, d, v); }
         else resetKb();
       }
