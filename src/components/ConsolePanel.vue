@@ -23,7 +23,12 @@ const collapsed = ref(false)
 const filter = ref<'all' | 'log' | 'info' | 'debug' | 'warn' | 'error'>('all')
 
 const scroller = ref<HTMLDivElement | null>(null)
-/** 用户手动向上滚动后暂停自动滚动，滚回底部恢复。 */
+/**
+ * 是否跟随最新输出（默认跟随）。
+ *
+ * 用户手动往上翻时置 false，滚回底部自动恢复 true —— 判定只认**用户**的滚动，
+ * 见 [`onScroll`] 与 [`autoScrolling`]。
+ */
 const stickToBottom = ref(true)
 
 const FILTERS = ['all', 'log', 'info', 'debug', 'warn', 'error'] as const
@@ -52,13 +57,31 @@ function fmtTime(ts: number): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
+/**
+ * 拉取历史输出并**合并**进当前列表。
+ *
+ * 不能写成 `lines.value = await invoke(...)`：这个请求是异步的，而脚本可能已经在推
+ * `script-console` 事件了 —— 晚到的快照会把刚收到的实时行**整段覆盖掉**（表现为
+ * 「面板里没有日志 / 只有前几行」）。所以按 `seq` 去重合并，两边都不丢。
+ */
 async function loadSnapshot() {
+  let snapshot: ConsoleLine[] = []
   try {
-    lines.value = await invoke<ConsoleLine[]>('get_script_console')
+    snapshot = await invoke<ConsoleLine[]>('get_script_console')
   }
   catch {
-    // 面板是辅助功能：拿不到日志不该打断脚本页
+    // 面板是辅助功能：拿不到历史不该打断脚本页
+    return
   }
+
+  const bySeq = new Map<number, ConsoleLine>()
+  for (const line of snapshot) {
+    bySeq.set(line.seq, line)
+  }
+  for (const line of lines.value) {
+    bySeq.set(line.seq, line)
+  }
+  lines.value = [...bySeq.values()].sort((a, b) => a.seq - b.seq)
 }
 
 async function clear() {
@@ -70,17 +93,41 @@ async function clear() {
   }
 }
 
-/** 贴底时滚到最新一行。 */
+/** 我们主动滚动期间为 true —— 用来把手动滚动与程序滚动区分开。 */
+let autoScrolling = false
+
+/**
+ * 滚到最新一行。
+ *
+ * 只在「用户本来就贴着底部」时生效（往上翻看历史时不要把他拽回来）。
+ */
 async function scrollToBottom() {
   if (!stickToBottom.value || collapsed.value)
     return
   await nextTick()
   const element = scroller.value
-  if (element)
-    element.scrollTop = element.scrollHeight
+  if (!element)
+    return
+
+  autoScrolling = true
+  // 用最大合法值，兼容浏览器把 scrollTop 钳到 scrollHeight - clientHeight 的行为
+  element.scrollTop = element.scrollHeight
+  // 等一帧：滚动会异步派发 `scroll` 事件，让它在 autoScrolling 仍为 true 时到达
+  requestAnimationFrame(() => {
+    autoScrolling = false
+    // 已经贴底了，把标记补上（清空后内容变短等情况）
+    stickToBottom.value = true
+  })
 }
 
 function onScroll() {
+  // 程序滚动（我们刚把 scrollTop 设到底）不算用户意图：新日志让内容变高时，
+  // 浏览器会先派发一次 `scroll`，此时位置已不在底部 —— 若在这里判定，就会误把
+  // 「自动跟随」关掉，于是**新行再也不会自动滚到底**（这就是之前的 bug）。
+  if (autoScrolling) {
+    return
+  }
+
   const element = scroller.value
   if (!element)
     return
@@ -92,12 +139,17 @@ const unlistens: UnlistenFn[] = []
 
 onMounted(async () => {
   await loadSnapshot()
+  // 打开面板/重新打开窗口时先贴到底，看到最新一行
+  void scrollToBottom()
 
   unlistens.push(await listen<ConsoleLine>('script-console', (event) => {
     lines.value.push(event.payload)
   }))
   unlistens.push(await listen('script-console-clear', () => {
     lines.value = []
+    // 清空后内容变短，重新跟随
+    stickToBottom.value = true
+    void scrollToBottom()
   }))
 })
 
@@ -105,7 +157,21 @@ onUnmounted(() => {
   unlistens.forEach(fn => fn())
 })
 
-watch(visibleLines, () => {
+/**
+ * 新输出到达后跟随到底部。
+ *
+ * 这里特意 watch `lines.length`（数字）而**不是** `visibleLines`：
+ * 过滤为「全部」时 `visibleLines` 就是 `lines.value` **同一个数组引用**，
+ * Vue 做值比较时认为没变 —— watch 永远不触发，于是自动滚动整个失效（踩过）。
+ * 数字长度是原始值，变化必然可见；过滤切换另由 `filter` 单独处理。
+ */
+watch(() => lines.value.length, () => {
+  void scrollToBottom()
+})
+
+// 切换等级过滤后也跟随到底部（过滤会改变可见行数）
+watch(filter, () => {
+  stickToBottom.value = true
   void scrollToBottom()
 })
 
@@ -119,9 +185,12 @@ watch(collapsed, (value) => {
 </script>
 
 <template>
-  <section class="shrink-0 border-t" :class="collapsed ? '' : 'h-52'">
+  <section
+    class="flex shrink-0 flex-col overflow-hidden border-t"
+    :class="collapsed ? '' : 'h-52'"
+  >
     <!-- 工具栏 -->
-    <div class="flex h-9 items-center gap-2 px-3 text-xs">
+    <div class="flex h-9 shrink-0 items-center gap-2 px-3 text-xs">
       <Terminal class="h-3.5 w-3.5 text-muted-foreground" />
       <span class="font-medium">Console</span>
       <span class="text-muted-foreground">{{ visibleLines.length }}/{{ lines.length }}</span>
@@ -154,7 +223,7 @@ watch(collapsed, (value) => {
     <div
       v-show="!collapsed"
       ref="scroller"
-      class="h-[calc(100%-2.25rem)] overflow-y-auto px-3 pb-2 font-mono text-[11px] leading-5"
+      class="min-h-0 flex-1 overflow-y-auto px-3 pb-2 font-mono text-[11px] leading-5"
       @scroll="onScroll"
     >
       <div
