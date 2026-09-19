@@ -18,6 +18,8 @@
     "core:window:allow-destroy",
     "core:window:allow-current-monitor",
     "core:window:allow-set-position",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-is-always-on-top",
     "dialog:allow-ask",
     "core:tray:default",
     "clipboard-manager:allow-read-text",

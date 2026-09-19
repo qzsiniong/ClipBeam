@@ -1,19 +1,27 @@
 // 脚本编辑器：CodeMirror 6 的扩展组装。
 //
-// 一个地方把编辑器需要的东西拼齐：基础编辑体验（`basicSetup`）、语言解析、补全、
-// 类型诊断 lint、主题、以及「运行 / 保存」快捷键与变更回调。
+// 一个地方把编辑器需要的东西拼齐：基础编辑体验、语言解析（高亮）、**TypeScript 驱动的**
+// 补全 / 悬停 / 参数信息 / 类型诊断，以及「运行 / 保存」快捷键与变更回调。
 //
-// 分文件的原因：这里只管「装配」，[`autocomplete.ts`](./autocomplete.ts)、
-// [`typecheck.ts`](./typecheck.ts)、[`linter.ts`](./linter.ts) 各自负责一件事。
+// 分工：
+// * [`language.ts`](./language.ts)      —— lezer 语法（只负责高亮与缩进）
+// * [`language-service.ts`](./language-service.ts) —— TypeScript 语言服务（语义：类型）
+// * [`completion.ts`](./completion.ts)  —— 补全（含语言服务未就绪时的兜底）
+// * [`hover.ts`](./hover.ts)            —— 悬停类型 + JSDoc
+// * [`signature.ts`](./signature.ts)    —— 参数信息面板
+// * [`linter.ts`](./linter.ts)          —— 诊断标红/标黄
+//
+// 语义相关的一切都走**同一个**语言服务实例，所以「诊断说没问题、hover 说旧类型」这种
+// 不一致不会发生（见 language-service.ts 里的版本号说明）。
 
 import type { Extension } from '@codemirror/state'
 import type { Capability } from './autocomplete'
-import { autocompletion } from '@codemirror/autocomplete'
+import type { ScriptGetter } from './completion'
+import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { bracketMatching, defaultHighlightStyle, indentOnInput, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import { Compartment, EditorState, Prec } from '@codemirror/state'
-
 import {
   drawSelection,
   EditorView,
@@ -22,9 +30,11 @@ import {
   keymap,
   lineNumbers,
 } from '@codemirror/view'
-import { clipbeamCompletion } from './autocomplete'
+import { clipbeamCompletionSource } from './completion'
+import { clipbeamHover } from './hover'
 import { clipbeamLanguage } from './language'
 import { clipbeamLinter } from './linter'
+import { clipbeamSignatureHelp } from './signature'
 
 /** 编辑器对外暴露的回调。 */
 export interface EditorHooks {
@@ -47,26 +57,33 @@ export const completionCompartment = new Compartment()
  *
  * 单独抽出来是为了「拿到能力清单后热替换」：能力列表来自后端，编辑器可能先挂载完成。
  */
-export function completionExtension(capabilities: Capability[]): Extension {
-  return autocompletion({ activateOnTyping: true, closeOnBlur: true, override: [clipbeamCompletion(capabilities)] })
+export function completionExtension(
+  getScript: ScriptGetter,
+  getCapabilities: () => Capability[],
+): Extension {
+  return autocompletion({
+    activateOnTyping: true,
+    closeOnBlur: true,
+    // 只注册**一个** source：它内部按语言服务是否就绪决定走 TS 还是能力清单兜底。
+    // 之前用 override 直接顶掉了语言自带补全，导致变量完全没有补全。
+    override: [clipbeamCompletionSource(getScript, getCapabilities)],
+  })
 }
 
 /**
  * 组装完整的编辑器扩展。
  *
- * @param language `'js'` 或 `'ts'`，决定语言解析与类型检查的严格程度。
- * @param getScriptName 脚本名 getter（lint 用它判断 `.ts` / `.js`）。
- * @param capabilities 后端返回的能力清单（决定 `$.` 补全项）。
+ * @param getScript 读取当前脚本（名字 + 内容），语义功能都靠它。
+ * @param getCapabilities 能力清单（仅用于语言服务未就绪时的兜底补全）。
  * @param hooks 变更 / 运行 / 保存回调。
  */
 export function clipbeamExtensions(
-  language: 'js' | 'ts',
-  getScriptName: () => string,
-  capabilities: Capability[],
+  getScript: ScriptGetter,
+  getCapabilities: () => Capability[],
   hooks: EditorHooks,
 ): Extension[] {
   return [
-    // 基础编辑体验：行号、历史、括号匹配、搜索、当前行高亮…
+    // 基础编辑体验：行号、历史、括号匹配/自动闭合、搜索、当前行高亮…
     lineNumbers(),
     highlightActiveLineGutter(),
     highlightActiveLine(),
@@ -74,15 +91,18 @@ export function clipbeamExtensions(
     history(),
     indentOnInput(),
     bracketMatching(),
+    closeBrackets(),
     highlightSelectionMatches(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 
-    // 语言与补全（两者都能用 compartment 热替换）
-    languageCompartment.of(clipbeamLanguage(language)),
-    completionCompartment.of(completionExtension(capabilities)),
+    // 语言（高亮/缩进）与补全
+    languageCompartment.of(clipbeamLanguage(getScript().name)),
+    completionCompartment.of(completionExtension(getScript, getCapabilities)),
 
-    // 类型诊断：TypeScript 编译器 API 算出来的真错误/警告
-    clipbeamLinter(getScriptName),
+    // 语义能力：悬停、参数信息、类型诊断由同一个 TypeScript 语言服务提供
+    clipbeamHover(getScript),
+    clipbeamSignatureHelp(getScript),
+    clipbeamLinter(() => getScript().name),
 
     // 运行 / 保存放在最高优先级，避免被其它键位吃掉
     Prec.highest(
@@ -103,7 +123,7 @@ export function clipbeamExtensions(
         },
       ]),
     ),
-    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+    keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
 
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
@@ -121,14 +141,19 @@ export function clipbeamExtensions(
       },
       '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
       '.cm-content': { paddingBottom: '2rem' },
+      '.cm-tooltip': { fontSize: '12px' },
     }),
   ]
 }
 
 /** 用新的补全数据替换编辑器里的补全扩展。 */
-export function replaceCompletion(view: EditorView, capabilities: Capability[]) {
+export function replaceCompletion(
+  view: EditorView,
+  getScript: ScriptGetter,
+  getCapabilities: () => Capability[],
+) {
   view.dispatch({
-    effects: completionCompartment.reconfigure(completionExtension(capabilities)),
+    effects: completionCompartment.reconfigure(completionExtension(getScript, getCapabilities)),
   })
 }
 

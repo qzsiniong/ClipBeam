@@ -11,14 +11,11 @@
 // 改 core 能力时记得同步这个文件（tests/spec_sync.rs 会校验不漂移）。
 
 /**
- * 脚本里的能力命名空间。
+ * 脚本里的能力命名空间：所有能力（core 的 `file` / `sleep`，以及使用方注入的
+ * `md5` / `zstd` / `typeStr` …）都挂在它上面；全局别名是 `$`。
  *
- * 用 `interface` 而不是对象字面量类型，是为了让使用方（例如 ClipBeam 的
- * clipbeam-scripting）能用**接口声明合并**追加自己的能力：
- *
- * ```ts
- * interface Clipbeam { md5(data: ArrayBuffer): string }
- * ```
+ * 声明成 `interface` 是为了让使用方用接口声明合并追加自己的能力
+ * （设计说明见 .trae/documents/js-ts-engine-port.md）。
  */
 interface Clipbeam {
 	/**
@@ -37,10 +34,10 @@ interface Clipbeam {
 	sleep(ms: number): Promise<void>
 }
 
-/** 能力命名空间的全局对象（core 的 `file` / `sleep`）。 */
+/** 能力命名空间的全局对象（脚本里的 `Clipbeam`）。 */
 declare const Clipbeam: Clipbeam
 
-/** `$` 是 `Clipbeam` 的别名，指向同一个对象。 */
+/** `$` 是 `Clipbeam` 的别名，指向同一个对象；写起来更短。 */
 declare const $: Clipbeam
 
 // ── 运行时补齐的标准全局（由 src/prelude.js 提供）───────────────────────────

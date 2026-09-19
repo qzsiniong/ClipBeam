@@ -352,20 +352,33 @@ Linux   ~/.config/ClipBeam/scripts/
 
 ### 编辑器能力
 
-脚本窗口里的编辑器用 CodeMirror 6，提供：
+脚本窗口里的编辑器用 CodeMirror 6（高亮/缩进来自 lezer），**语义能力全部来自一个进程内的
+TypeScript 语言服务** —— 补全、悬停、参数信息、诊断问的是同一个服务、同一份虚拟文件表，
+所以不会出现「诊断说没问题、悬停说旧类型」这种不一致：
 
-- JS/TS 语法高亮、括号匹配、自动缩进、搜索；
-- `$.` / `Clipbeam.` **补全**（数据来自后端能力清单，与运行期注册的能力同源）；
-- **TypeScript 真类型诊断**：用 TypeScript 编译器 API 检查脚本，
-  类型不匹配、拼错方法名、用了运行时不存在的 API 都会在编辑器里标红/标黄；
-- `Cmd/Ctrl+Enter` 运行、`Cmd/Ctrl+S` 保存。
+| 能力 | 说明 |
+|---|---|
+| 补全 | 按上下文给候选：`Clipbeam.` / `$.` 列出全部能力（带签名与 JSDoc）、变量后列出它类型的成员、标识符位置列出作用域内的变量；候选项的详情面板显示签名 + 说明 |
+| 悬停 | 悬停任何标识符/表达式显示类型签名 + JSDoc，例如 `(method) Clipbeam.md5(data: ArrayBuffer): string`；说明会被清理 Markdown 并截断（最长 260 字），tooltip 限宽 460px、限高 240px，避免盖住代码 |
+| 参数信息 | 在调用括号里显示签名并高亮当前参数（编辑器顶部一条，例如 `zstd(data: ArrayBuffer, chunkSize?: number)` + `参数 1/2`） |
+| 诊断 | 类型不匹配、拼错方法名、用了运行时不存在的 API 都会标红/标黄（`TS2345:` 这类错误码也一并显示） |
+| 编辑体验 | 括号匹配/自动闭合、自动缩进、搜索、`Cmd/Ctrl+Enter` 运行、`Cmd/Ctrl+S` 保存 |
 
-编辑器里的类型提示来自两个声明文件（`crates/*/src/spec/clipbeam.d.ts`），
-它们同时被 `pnpm typecheck:scripts` 使用，因此**编辑器里的断言与命令行检查一致**：
+编辑器里的类型来自两个声明文件（`crates/*/src/spec/clipbeam.d.ts`），它们同时被
+`pnpm typecheck:scripts` 使用，因此**编辑器里的断言与命令行检查一致**：
 
 ```bash
 pnpm typecheck:scripts    # 用 tsc 检查 scripts/*.ts（不需要装 Node 也能运行脚本本身）
+pnpm test:editor          # 编辑器语义功能的单测（悬停/补全/参数信息/诊断）
 ```
+
+> TypeScript 语言服务是**懒加载**的（体积不小）：首次打开脚本页时后台预热，
+> 就绪前补全退回「能力清单」版本、悬停不弹框；加载失败也只是退化，不影响编辑与运行。
+
+### 窗口置顶
+
+脚本窗口工具栏有一个「置顶」按钮：打开后窗口始终压在其他窗口之上（`alwaysOnTop`），
+方便把编辑器和目标窗口并排摆放。状态不持久化 —— 每次打开脚本窗口回到默认（不置顶）。
 
 ### TypeScript 支持范围
 

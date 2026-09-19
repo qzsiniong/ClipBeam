@@ -14,8 +14,9 @@ import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { Capability } from '@/lib/clipbeam-script/autocomplete'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ask } from '@tauri-apps/plugin-dialog'
-import { FolderOpen, Play, RefreshCw, Save, Square } from 'lucide-vue-next'
+import { FolderOpen, Pin, PinOff, Play, RefreshCw, Save, Square } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ConsolePanel from '@/components/ConsolePanel.vue'
 import ScriptEditor from '@/components/ScriptEditor.vue'
@@ -34,6 +35,9 @@ const savedSource = ref('')
 const busy = ref(false)
 const lastOutcome = ref<TaskOutcome | null>(null)
 const lastError = ref<string | null>(null)
+
+/** 窗口是否置顶（脚本窗口需要长时间停留，常和别的窗口并排用）。 */
+const alwaysOnTop = ref(false)
 
 const unlistens: UnlistenFn[] = []
 
@@ -173,8 +177,35 @@ async function cancel() {
   await invoke('cancel_task')
 }
 
+/**
+ * 切换窗口置顶。
+ *
+ * 用 Tauri 的窗口 API（权限见 `src-tauri/capabilities/default.json` 里的
+ * `core:window:allow-set-always-on-top`）。不持久化：下次打开脚本窗口回到
+ * `tauri.conf.json` 里的默认值，避免为此引入 `tauri-plugin-window-state`。
+ */
+async function toggleAlwaysOnTop() {
+  lastError.value = null
+  try {
+    const next = !alwaysOnTop.value
+    await getCurrentWindow().setAlwaysOnTop(next)
+    alwaysOnTop.value = next
+  }
+  catch (e) {
+    lastError.value = String(e)
+  }
+}
+
 onMounted(async () => {
   await Promise.all([loadInfo(), loadList(), loadCapabilities()])
+
+  // 置顶初始状态以窗口真实状态为准（别信本地默认值）
+  try {
+    alwaysOnTop.value = await getCurrentWindow().isAlwaysOnTop()
+  }
+  catch {
+    // 拿不到就按未置顶显示；点一下按钮仍会尝试切换
+  }
 
   // 第一个脚本自动打开，省一次点击
   const first = scripts.value[0]
@@ -244,6 +275,15 @@ function warnUnsaved(event: BeforeUnloadEvent) {
           <Button size="sm" variant="outline" :disabled="!currentName || !dirty" @click="save">
             <Save class="h-4 w-4" />
             保存
+          </Button>
+          <Button
+            size="sm"
+            :variant="alwaysOnTop ? 'secondary' : 'ghost'"
+            :title="alwaysOnTop ? '取消置顶' : '窗口置顶（方便和别的窗口并排）'"
+            @click="toggleAlwaysOnTop"
+          >
+            <component :is="alwaysOnTop ? Pin : PinOff" class="h-4 w-4" />
+            {{ alwaysOnTop ? '已置顶' : '置顶' }}
           </Button>
           <Button size="sm" variant="ghost" @click="loadList">
             <RefreshCw class="h-4 w-4" />

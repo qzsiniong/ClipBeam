@@ -10,6 +10,7 @@
 -->
 <script setup lang="ts">
 import type { Capability } from '@/lib/clipbeam-script/autocomplete'
+import type { ScriptTarget } from '@/lib/clipbeam-script/language-service'
 import { EditorView } from '@codemirror/view'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
@@ -19,6 +20,7 @@ import {
   replaceCompletion,
 } from '@/lib/clipbeam-script/clipbeam-editor'
 import { clipbeamLanguage } from '@/lib/clipbeam-script/language'
+import { warmup } from '@/lib/clipbeam-script/language-service'
 
 const props = withDefaults(defineProps<{
   /** 当前脚本源码。 */
@@ -49,18 +51,29 @@ let view: EditorView | null = null
 /** 防止「外部写入 → updateListener → 再 emit」的回环。 */
 let syncing = false
 
+/**
+ * 语义功能（补全/悬停/参数信息/诊断）都靠这个 getter 拿「当前脚本名 + 内容」。
+ *
+ * 用 getter 而不是快照：扩展在挂载时只装配一次，之后切换文件、继续打字都要看到最新值。
+ */
+function currentScript(): ScriptTarget {
+  return { name: props.scriptName, source: props.modelValue }
+}
+
 onMounted(() => {
   if (!host.value)
     return
+
+  // 预加载 TypeScript 语言服务：第一次 hover/补全就不用等它
+  void warmup()
 
   view = new EditorView({
     parent: host.value,
     state: createEditorState(
       props.modelValue,
       clipbeamExtensions(
-        props.language,
-        () => props.scriptName,
-        props.capabilities,
+        currentScript,
+        () => props.capabilities,
         {
           onChange: (value) => {
             if (syncing)
@@ -91,17 +104,17 @@ watch(() => props.modelValue, (value) => {
   syncing = false
 })
 
-// 语言切换：只换语言扩展，保留文档与历史
-watch(() => props.language, (language) => {
+// 语言切换（按脚本扩展名）：只换语言扩展，保留文档与历史
+watch(() => props.scriptName, () => {
   view?.dispatch({
-    effects: languageCompartment.reconfigure(clipbeamLanguage(language)),
+    effects: languageCompartment.reconfigure(clipbeamLanguage(currentScript().name)),
   })
 })
 
 // 能力清单晚于编辑器到位时热替换补全
-watch(() => props.capabilities, (capabilities) => {
+watch(() => props.capabilities, () => {
   if (view)
-    replaceCompletion(view, capabilities)
+    replaceCompletion(view, currentScript, () => props.capabilities)
 }, { deep: true })
 </script>
 

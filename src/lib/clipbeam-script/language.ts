@@ -9,12 +9,20 @@
 import type { Extension } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
 
+/** 按脚本文件名判断语言（`.ts` / `.mts` / `.cts` 之外的都按 JS）。 */
+export function languageOf(name: string): 'js' | 'ts' {
+  return /\.(?:ts|mts|cts)$/i.test(name) ? 'ts' : 'js'
+}
+
 /**
  * 按脚本语言返回 CodeMirror 的语言扩展。
  *
  * `jsx: false`：脚本运行时不支持 JSX/TSX（引擎会明确报错），
  * 打开它只会让编辑器接受跑不了的语法，所以关掉。
+ *
+ * 注意：这里只提供**语法层**（高亮、缩进、括号）。类型、补全、悬停、诊断都来自
+ * [`./language-service.ts`](./language-service.ts) 的 TypeScript 语言服务。
  */
-export function clipbeamLanguage(language: 'js' | 'ts'): Extension {
-  return javascript({ typescript: language === 'ts', jsx: false })
+export function clipbeamLanguage(name: string): Extension {
+  return javascript({ typescript: languageOf(name) === 'ts', jsx: false })
 }
