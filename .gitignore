@@ -1,3 +1,5 @@
+.trae/
+
 # Rust
 target/
 **/*.rs.bk
@@ -10,6 +12,12 @@ src-tauri/gen/
 node_modules/
 dist/
 .vite/
+.pnpm-store/
 
 # OS
 .DS_Store
+
+# 单一 lockfile：仓库根的 Cargo.lock 覆盖整个 workspace（含 src-tauri）；
+# 成员包自己的 lock 不再使用，避免两份锁文件互相漂移。
+src-tauri/Cargo.lock
+crates/*/Cargo.lock

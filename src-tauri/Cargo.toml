@@ -17,6 +17,10 @@ name = "qr_e2e"
 path = "../examples/qr_e2e.rs"
 
 [dependencies]
+# 脚本引擎：core 只提供运行时 / TS 转译 / 基础能力 / 扩展机制
+clipbeam-script = { path = "../crates/clipbeam-script" }
+# 使用方能力集：md5 / base32 / zstd / typeStr / confirm + 脚本目录 + CLI 宿主
+clipbeam-scripting = { path = "../crates/clipbeam-scripting" }
 tauri = { version = "2", features = [
   "tray-icon",
   "image-png",
@@ -25,6 +29,8 @@ tauri = { version = "2", features = [
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
+# 脚本 $.confirm 的系统原生确认框(macOS/Windows/Linux 原生对话框)
+tauri-plugin-dialog = "2"
 enigo = "0.6"
 arboard = "3"
 xcap = { version = "0.9", features = [ "image" ], default-features = false }
@@ -73,6 +79,5 @@ image = { version = "0.25", features = [
 png = "0.18"
 tauri-build = { version = "2", features = [] }
 
-[profile.release]
-opt-level = 2
-strip = true
+# 注意：[profile.release] 必须放在 workspace 根（../Cargo.toml），
+# 放在成员包里会被 cargo 忽略并给出警告。

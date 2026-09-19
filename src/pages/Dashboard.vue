@@ -84,6 +84,11 @@ async function cancelTask() {
   await invoke('cancel_task')
 }
 
+/** 脚本有自己的大窗口(见 tauri.conf.json 的 `scripting`)。 */
+async function openScripts() {
+  await invoke('open_scripts_window')
+}
+
 async function showWindow() {
   await getCurrentWindow().show()
   await getCurrentWindow().setFocus()
@@ -245,6 +250,9 @@ const speedUnit = computed(() => (kind.value === 'recv' ? '帧/秒' : '字符/�
         </Button>
         <Button :disabled="busy" variant="outline" @click="deployCopy">
           部署接收页(剪贴板)
+        </Button>
+        <Button :disabled="busy" variant="outline" @click="openScripts">
+          运行脚本
         </Button>
         <Button v-if="busy" variant="destructive" @click="cancelTask">
           中止

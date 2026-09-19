@@ -17,8 +17,8 @@ use tokio::sync::{oneshot, Mutex};
 /// 进度事件节流间隔(毫秒)。1s 更新一次,避免数字跳动;首帧/末帧强制 emit。
 const PROGRESS_THROTTLE_MS: u64 = 1000;
 
-/// 待命窗口超时(秒)。
-const STANDBY_TIMEOUT_SECS: u64 = 10;
+/// 待命窗口超时(秒)。也被 `standby::arm_standby` 复用(脚本的惰性待命)。
+pub const STANDBY_TIMEOUT_SECS: u64 = 10;
 
 /// 任务种类(与原 main.rs 的 TaskKind 等价)。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -28,6 +28,21 @@ pub enum TaskKind {
     Send,
     Recv,
     DeployType,
+    /// 运行用户脚本(JS/TS)。输出走 Typer,确认走前端弹窗。
+    Script,
+}
+
+/// 一次脚本任务的请求:脚本名 + 已转译的源码。
+///
+/// 由 `commands::start_script` 准备好后放进 `WorkerState::pending_script`,
+/// `WorkerState::start` 取出执行。之所以做成「先放请求再 start」:
+/// `start(kind, app)` 的签名保持不变,不牵连既有的四个任务。
+#[derive(Clone)]
+pub struct ScriptRequest {
+    /// 出现在错误信息里的脚本名(文件名)。
+    pub name: String,
+    /// 已经过 TS 转译的源码。
+    pub source: String,
 }
 
 /// 任务最终结果(已转成可展示文案)。
@@ -45,6 +60,10 @@ pub struct Progress {
     pub total: usize,
     pub started_at: u64,
     pub ts: u64,
+    /// 脚本任务当前输出的片段(其它任务为空)。加了 serde 默认值,
+    /// 老前端收到多出来的字段不会报错。
+    #[serde(default)]
+    pub snippet: String,
 }
 
 /// 当前 Worker 状态快照。
@@ -68,15 +87,21 @@ pub struct WorkerState {
     current: Arc<Mutex<Option<Handle>>>,
     progress: Arc<RwLock<(usize, usize)>>,
     started_at: Arc<RwLock<u64>>,
+    /// 待执行的脚本任务(见 [`ScriptRequest`])。
+    pending_script: Arc<std::sync::Mutex<Option<ScriptRequest>>>,
+    /// 脚本 Console 面板的输出缓冲(见 [`crate::console_panel`])。
+    pub console: Arc<crate::console_panel::ConsoleBuffer>,
 }
 
 impl WorkerState {
-    pub fn new(cfg: Config) -> Self {
+    pub fn new(cfg: Config, app: tauri::AppHandle) -> Self {
         Self {
             config: Arc::new(RwLock::new(cfg)),
             current: Arc::new(Mutex::new(None)),
             progress: Arc::new(RwLock::new((0, 0))),
             started_at: Arc::new(RwLock::new(0)),
+            pending_script: Arc::new(std::sync::Mutex::new(None)),
+            console: crate::console_panel::ConsoleBuffer::new(app),
         }
     }
 
@@ -95,6 +120,7 @@ impl WorkerState {
         let current = self.current.clone();
         let config_store = self.config.clone();
         let started_at_clone = self.started_at.clone();
+        let script_request = self.pending_script.lock().unwrap().take();
         let tok = token.clone();
 
         // 记录任务起始时间(epoch 毫秒)
@@ -122,8 +148,11 @@ impl WorkerState {
             notify::notify("ClipBeam", "热键切换失败,任务仍在运行");
         }
 
-        // 接收任务不需要 standby(截屏不注入键盘事件到其他窗口,焦点安全)
-        if kind == TaskKind::Recv {
+        // 不需要「启动前待命」的任务直接执行:
+        // - Recv:截屏不注入键盘事件到其他窗口,焦点安全;
+        // - Script:脚本不一定输出,启动前弹待命会打扰纯计算脚本。它的待命是**惰性**的,
+        //   只在首次 `$.typeStr` 之前由 StandbyGate 触发(见 scripting.rs 的 type_str)。
+        if matches!(kind, TaskKind::Recv | TaskKind::Script) {
             Self::execute_task(
                 app,
                 kind,
@@ -133,6 +162,7 @@ impl WorkerState {
                 current,
                 config_store,
                 started_at_clone,
+                script_request,
             );
             return Ok(());
         }
@@ -160,6 +190,8 @@ impl WorkerState {
             TaskKind::SendRaw => cfg.send_raw_hotkey.clone(),
             TaskKind::Send => cfg.send_hotkey.clone(),
             TaskKind::DeployType => cfg.stop_hotkey.clone(),
+            // 运行脚本没有独立热键:用中止键的文案即可
+            TaskKind::Script => cfg.stop_hotkey.clone(),
             TaskKind::Recv => unreachable!(),
         };
         let _ = app.emit(
@@ -169,6 +201,7 @@ impl WorkerState {
 
         // spawn 等待 blur 或超时
         let app_clone = app.clone();
+        let script_request_for_task = script_request.clone();
         tokio::spawn(async move {
             let timeout = tokio::time::sleep(Duration::from_secs(STANDBY_TIMEOUT_SECS));
             tokio::pin!(timeout);
@@ -183,6 +216,7 @@ impl WorkerState {
                     Self::execute_task(
                         app_clone, kind, cfg_for_task, tok, progress,
                         current, config_store, started_at_clone,
+                        script_request_for_task,
                     );
                 }
                 _ = &mut timeout => {
@@ -208,6 +242,7 @@ impl WorkerState {
     }
 
     /// 真正执行任务(spawn_blocking)。
+    #[allow(clippy::too_many_arguments)]
     fn execute_task(
         app: AppHandle,
         kind: TaskKind,
@@ -217,6 +252,7 @@ impl WorkerState {
         current: Arc<Mutex<Option<Handle>>>,
         config_store: Arc<RwLock<Config>>,
         started_at: Arc<RwLock<u64>>,
+        script_request: Option<ScriptRequest>,
     ) {
         let progress_display = cfg.progress_display;
         // 显示进度窗口(如果配置 Floating 或 Both),不抢焦点
@@ -271,6 +307,8 @@ impl WorkerState {
                             total,
                             started_at: started_at_val,
                             ts: now,
+                            // 脚本任务的片段由 TauriScriptHost 直接 emit,这里不带
+                            snippet: String::new(),
                         },
                     );
                     // 更新托盘图标 + 状态行(如果配置 Tray 或 Both)
@@ -278,11 +316,7 @@ impl WorkerState {
                         progress_display,
                         ProgressDisplay::Tray | ProgressDisplay::Both
                     ) {
-                        let percent = if total > 0 {
-                            (got * 100 / total) as u8
-                        } else {
-                            0
-                        };
+                        let percent = (got * 100).checked_div(total).unwrap_or(0) as u8;
                         let status_text =
                             format!("状态:{kind_for_closure:?} {percent}% · {got}/{total}");
                         let _ = tray::set_status_text(&app_for_progress, &status_text);
@@ -290,7 +324,19 @@ impl WorkerState {
                     }
                 }
             };
-            let outcome = run_worker(kind, cfg, token, &send_progress);
+            let app_for_task = app.clone();
+            let progress_for_task = progress.clone();
+            let current_for_task = current.clone();
+            let outcome = run_worker(
+                kind,
+                cfg,
+                token,
+                &send_progress,
+                script_request,
+                &app_for_task,
+                progress_for_task,
+                current_for_task,
+            );
 
             // 组装统计信息(用时、平均速度、已发/总)
             let (got, total) = progress.read().map(|p| *p).unwrap_or((0, 0));
@@ -339,6 +385,16 @@ impl WorkerState {
                 log::error!("恢复空闲热键失败: {e}");
             }
         });
+    }
+
+    /// 登记待运行的脚本(见 [`ScriptRequest`])；`start` 时取走。
+    pub fn set_pending_script(&self, request: ScriptRequest) {
+        *self.pending_script.lock().unwrap() = Some(request);
+    }
+
+    /// 清掉待运行的脚本（启动失败时用，避免残留污染下一次任务）。
+    pub fn clear_pending_script(&self) {
+        *self.pending_script.lock().unwrap() = None;
     }
 
     /// 中止当前任务(如有)。
@@ -390,17 +446,25 @@ impl WorkerState {
 }
 
 /// 后台线程入口:执行任务并回传进度/结果。
+///
+/// 脚本任务(`TaskKind::Script`)在这里调 `tauri::async_runtime::block_on` 驱动引擎 ——
+/// 当前函数本身运行在 `spawn_blocking` 出来的线程上,阻塞它是安全的。
+#[allow(clippy::too_many_arguments)]
 fn run_worker<F>(
     kind: TaskKind,
     cfg: Config,
     token: CancellationToken,
     send_progress: &F,
+    script_request: Option<ScriptRequest>,
+    app: &tauri::AppHandle,
+    progress: Arc<RwLock<(usize, usize)>>,
+    current: Arc<Mutex<Option<Handle>>>,
 ) -> TaskOutcome
 where
     F: Fn(usize, usize),
 {
     let outcome = match kind {
-        TaskKind::SendRaw => match send::run_once(&cfg, true, &token, true, |g, t| send_progress(g, t)) {
+        TaskKind::SendRaw => match send::run_once(&cfg, true, &token, true, send_progress) {
             send::SendReport::Done {
                 frame_chars,
                 text_bytes,
@@ -417,7 +481,7 @@ where
                 body: e,
             },
         },
-        TaskKind::Send => match send::run_once(&cfg, false, &token, true, |g, t| send_progress(g, t)) {
+        TaskKind::Send => match send::run_once(&cfg, false, &token, true, send_progress) {
             send::SendReport::Done {
                 frame_chars,
                 text_bytes,
@@ -434,7 +498,7 @@ where
                 body: e,
             },
         },
-        TaskKind::Recv => match receive::run_once(&cfg, &token, |g, t| send_progress(g, t)) {
+        TaskKind::Recv => match receive::run_once(&cfg, &token, send_progress) {
             receive::RecvReport::Done { frames, text_bytes } => TaskOutcome {
                 title: "✓ 远程剪贴板已接收".into(),
                 body: format!("{frames} 帧,{text_bytes} 字节已写入本机剪贴板"),
@@ -453,7 +517,7 @@ where
             },
         },
         TaskKind::DeployType => {
-            match deploy::type_bootstrap(&cfg, &token, true, |g, t| send_progress(g, t)) {
+            match deploy::type_bootstrap(&cfg, &token, true, send_progress) {
                 typer::TypeResult::Completed(n) => TaskOutcome {
                     title: "✓ 接收页引导包已输入".into(),
                     body: format!("{n} 字符;请把记事本内容另存为 clipbeam.html 后打开"),
@@ -468,8 +532,140 @@ where
                 },
             }
         }
+        TaskKind::Script => run_script_task(
+            app,
+            &token,
+            script_request,
+            progress,
+            current,
+            send_progress,
+        ),
     };
     outcome
+}
+
+/// 执行一个脚本任务:转译 → 在引擎里跑 → 把结果整理成文案。
+///
+/// 进度由宿主(`TauriScriptHost`)直接 emit;这里只负责首帧与结果文案。
+fn run_script_task<F>(
+    app: &tauri::AppHandle,
+    token: &CancellationToken,
+    request: Option<ScriptRequest>,
+    progress: Arc<RwLock<(usize, usize)>>,
+    current: Arc<Mutex<Option<Handle>>>,
+    send_progress: &F,
+) -> TaskOutcome
+where
+    F: Fn(usize, usize),
+{
+    let Some(request) = request else {
+        return TaskOutcome {
+            title: "脚本未执行".into(),
+            body: "没有拿到脚本内容(内部状态异常,请重试)".into(),
+        };
+    };
+
+    let started = std::time::Instant::now();
+
+    // Console 面板只属于**本次运行**:上一轮的输出留在面板里只会干扰排查
+    let console = app.state::<WorkerState>().console.clone();
+    console.clear();
+    console.push("info", &format!("▶ 运行 {}{}", request.name, if crate::scripting::may_type(&request.source) { "(含键盘输出)" } else { "" }));
+
+    // 待命门闩:惰性放行 —— 只有真的要把内容打进目标窗口时才需要用户先点一下目标窗口
+    let standby = Arc::new(crate::standby::StandbyGate::new());
+    let on_standby_cancel: crate::scripting::CancelHook = {
+        let app = app.clone();
+        let current = current.clone();
+        Arc::new(move || {
+            crate::notify::notify("ClipBeam", "未检测到点击,已停止输出");
+            // 与 cancel() 一致的收尾:清掉当前任务、恢复托盘与空闲热键。
+            // 脚本线程随后会因为取消令牌而退出,最终由 Worker 正常收尾。
+            if let Ok(mut guard) = current.try_lock() {
+                *guard = None;
+            }
+            let _ = tray::set_busy(&app, false, "状态:空闲");
+            let cfg_fresh = app
+                .state::<WorkerState>()
+                .config
+                .read()
+                .map(|cfg| cfg.clone())
+                .unwrap_or_default();
+            if let Err(e) =
+                crate::hotkey::set_mode(&app, &cfg_fresh, crate::hotkey::HotkeyMode::Idle)
+            {
+                log::error!("恢复空闲热键失败: {e}");
+            }
+        })
+    };
+
+    // 待命窗口不在这里弹:它只在**首次 `$.typeStr` 之前**由 `StandbyGate::ensure_ready` 触发
+    // (见 scripting.rs 的 type_str)。纯计算脚本因此完全不会被待命窗口打扰。
+    let host = Arc::new(crate::scripting::TauriScriptHost::new(
+        app.clone(),
+        token.clone(),
+        standby,
+        progress.clone(),
+        on_standby_cancel,
+        console.clone(),
+    ));
+
+    // 先报一次 0/0,让进度窗口立刻有反应
+    send_progress(0, 0);
+
+    let engine_cancel = crate::script_runner::engine_cancel(token);
+    // 引擎需要 tokio 上下文(AsyncRuntime 与 $.sleep 都依赖它):block_on 会把当前线程
+    // 带进 Tauri 的异步运行时。当前线程是 spawn_blocking 出来的,阻塞它是安全的。
+    let result = tauri::async_runtime::block_on(crate::script_runner::run_source(
+        &request.name,
+        &request.source,
+        host.clone() as Arc<dyn clipbeam_script::ScriptHost>,
+        engine_cancel,
+    ));
+
+    let typed = host.typed_chars();
+    let (got, total) = progress.read().map(|p| *p).unwrap_or((typed, typed));
+    send_progress(got.max(typed), total.max(typed));
+
+    match result {
+        Ok(()) => {
+            console.push(
+                "info",
+                &format!(
+                    "✓ 完成(输出 {typed} 个字符,用时 {}ms)",
+                    started.elapsed().as_millis()
+                ),
+            );
+            TaskOutcome {
+                title: "✓ 脚本执行完成".into(),
+                body: if typed > 0 {
+                    format!("已敲入 {typed} 个字符")
+                } else {
+                    "脚本执行完成(没有键盘输出)".to_string()
+                },
+            }
+        }
+        Err(err) => {
+            let text = crate::script_runner::describe_error(&err);
+            if text.contains("已中止") {
+                console.push(
+                    "warn",
+                    &format!("脚本已中止(已输出 {typed} 个字符)"),
+                );
+                TaskOutcome {
+                    title: "脚本已中止".into(),
+                    body: format!("已敲入 {typed} 个字符,请检查目标窗口内容是否完整"),
+                }
+            } else {
+                // 脚本异常也进面板:面板是"这次运行到底发生了什么"的完整记录
+                console.push("error", &text);
+                TaskOutcome {
+                    title: "脚本执行失败".into(),
+                    body: format!("{text}(已敲入 {typed} 个字符)"),
+                }
+            }
+        }
+    }
 }
 
 /// 创建一个已 abort 的 AbortHandle 占位(待命阶段无实际任务)。

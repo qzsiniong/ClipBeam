@@ -8,19 +8,15 @@ use std::path::PathBuf;
 /// 进度显示方式。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ProgressDisplay {
     /// 无框悬浮条(右上角 overlay 窗口)。
+    #[default]
     Floating,
     /// 托盘图标进度(状态栏图标动态变化)。
     Tray,
     /// 两者同时。
     Both,
-}
-
-impl Default for ProgressDisplay {
-    fn default() -> Self {
-        ProgressDisplay::Floating
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

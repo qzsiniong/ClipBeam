@@ -19,6 +19,7 @@
 - [工作原理](#工作原理)
 - [快速开始](#快速开始)
 - [使用方法](#使用方法)
+- [脚本引擎（JS/TS）](#脚本引擎jsts)
 - [配置与设置](#配置与设置)
 - [命令行子命令](#命令行子命令)
 - [构建](#构建)
@@ -145,7 +146,7 @@ scripts/package-macos.sh --install     # 安装到 /Applications，Spotlight 搜
 
 # 或直接运行裸二进制（联调用，会带一个终端窗口）
 cargo build --release
-./target/release/clipbeam          # 无参数 = 常驻系统托盘（macOS 不显示 Dock 图标）
+./target/release/clipbeam          # 无参数 = 常驻系统托盘（macOS 平时不显示 Dock 图标）
 ```
 
 ### 2. 授予权限（仅 macOS）
@@ -231,10 +232,163 @@ cargo build --release
 | 截屏接收远程二维码 | 触发一次协议 B 接收 |
 | 部署接收页到远程（键盘输入，约 3 分钟） | 协议 C，逐键敲自解压引导页 |
 | 部署接收页（复制到宿主机剪贴板） | 协议 C，走远程桌面自带剪贴板 |
+| 脚本编辑器… | 打开独立的脚本大窗口（编辑 + 运行 + Console 面板） |
 | 设置… | 打开设置窗口 |
 | 退出 ClipBeam | 退出常驻程序 |
 
 任务运行期间，三个执行类菜单项自动禁用。
+
+---
+
+## 脚本引擎（JS/TS）
+
+除了「发送本机剪贴板」这类固定动作，ClipBeam 还内置了一个**嵌入式脚本引擎**：
+用 JavaScript / TypeScript 编排整个流程（读文件 → 计算摘要 → 压缩分片 → 逐键输出），
+适合「把某个文件的多个分片依次敲进远程窗口」这类固定脚本化场景。
+
+```js
+const $ = Clipbeam
+const bytes = await $.file('data.bin')   // 读真实文件（相对路径按进程工作目录解析）
+const chunks = $.zstd(bytes, 1024)       // Zstandard 压缩并按 1 KiB 切片
+$.typeStr(`共 ${chunks.length} 片\n`, 10) // 逐键打进当前焦点窗口
+for (let i = 0; i < chunks.length; i++) {
+  if (await $.confirm(`发送第 ${i} 片？`)) {
+    await $.sleep(1000)
+    $.typeStr(`${i}\n${$.base32(chunks[i])}\n`, 10)
+  }
+}
+```
+
+### 三层结构
+
+| 层 | 位置 | 职责 |
+|---|---|---|
+| 引擎（core） | `crates/clipbeam-script/` | 跑 JS/TS（QuickJS + oxc 进程内转译）、基础能力（`$.file` / `$.sleep` / `console` / `TextDecoder` / `TextEncoder`）、**能力扩展机制** |
+| 使用方能力集 | `crates/clipbeam-scripting/` | 用扩展机制注入 ClipBeam 需要的能力：`md5` / `base32` / `zstd` / `typeStr` / `confirm`；脚本目录与内置示例；终端宿主 |
+| 应用 | `src-tauri/`（`scripting.rs` / `standby.rs` / `console_panel.rs` / `script_runner.rs`） | 接 Tauri 命令、Worker 任务、`Typer` 键盘输出、**系统原生确认框**、**惰性待命窗口**、**Console 面板缓冲** |
+
+引擎本身**不认识**剪贴板 / 键盘 / Zstandard：需要什么能力由使用方通过
+`ScriptExtension` 注入（新增能力只要实现 `register` + `spec` 两个方法）。
+
+### 能力一览
+
+| 能力 | 说明 |
+|---|---|
+| `$.file(path)` | 读真实文件，返回 `Promise<ArrayBuffer>`；相对路径按**进程工作目录**解析 |
+| `$.sleep(ms)` | 异步等待；被中止时立即返回 |
+| `$.md5(data)` | 32 位小写十六进制 MD5 |
+| `$.base32(data)` | RFC4648 Base32（无填充、小写） |
+| `$.zstd(data, chunkSize?)` | Zstandard 压缩（级别 3）并按 `chunkSize` 切片，默认 1024 字节 |
+| `$.typeStr(text, delayMs?)` | 把文本交给宿主输出：GUI 下逐个字符打进**当前焦点窗口**，命令行下打印到终端 |
+| `$.confirm(message)` | 向用户提问：GUI 下弹**系统原生**确认框（是 / 否 / 取消），命令行下读 stdin；回答「是」为 `true`、「否」为 `false`、取消/中止时抛异常，**不设超时**（一直等用户回答） |
+| `console.log/info/debug/warn/error` | 写到脚本窗口底部的 **Console 面板**（按等级着色）；命令行运行时打到终端 |
+| `TextDecoder` / `TextEncoder` | 支持全部 WHATWG 编码标签（`utf-8` / `gbk` / `gb18030` / `big5` / `shift_jis` …） |
+
+脚本里可以直接使用**顶层 `await`**，不需要包 `async` IIFE。
+
+### 运行方式
+
+**GUI**：托盘菜单「脚本编辑器…」，或主窗口侧边栏 / 仪表盘的「脚本」按钮
+→ 打开**独立的脚本大窗口**（1100×760，可缩放；左侧是脚本列表，右侧是编辑器 + Console）
+→ 选/新建脚本 → 点「运行」。
+
+脚本是一个独立窗口而不是主窗口里的一个页面，原因有三：编辑器需要足够的空间；
+它可以和主窗口/进度窗口并排摆放；关闭主窗口（托盘模式）后脚本窗口仍可独立使用。
+
+> **Dock 图标**：平时不占 Dock（托盘常驻），但**脚本窗口可见期间会显示 Dock 图标**，
+> 这样你可以把编辑器丢到另一块屏幕、用 Cmd+Tab 切回它；脚本窗口一关，Dock 图标随之消失。
+> 实现见 `src-tauri/src/lib.rs` 的 `sync_dock_icon`（用 Tauri 的 `set_dock_visibility`，
+> 它内部对 macOS 的进程类型切换做了防抖）。
+
+**待命窗口只在首次 `$.typeStr` 之前弹**：脚本不一定注入键盘事件（例如只读文件、算摘要的脚本），
+所以待命窗口是惰性的 ——
+
+* 脚本执行到**第一次** `$.typeStr` 时，才弹出待命窗口并等用户点击目标窗口；
+* 纯计算脚本（从不输出）**不会有任何待命提示**，直接跑完；
+* 同一次运行里只提示一次，后续 `$.typeStr` 不再重复打扰；
+* 脚本在那之前可能已经读文件、算摘要、打印 `console` 日志 —— 这些都照常执行。
+
+待命窗口有 10 秒倒计时，超时即取消任务。进度窗口会显示「已敲入 N/M 字符 + 当前输出片段」，
+按 **Esc**（或点「中止」）随时停下。
+
+**命令行**：`clipbeam script <文件>`，`$.typeStr` 写终端、`$.confirm` 读 stdin
+（不需要待命窗口：终端的焦点就是当前窗口）；加 `--raw` 时不走逐字打字节奏，
+适合把输出重定向到文件或管道。
+
+### 脚本目录
+
+```
+macOS   ~/Library/Application Support/ClipBeam/scripts/
+Windows %APPDATA%\ClipBeam\scripts\
+Linux   ~/.config/ClipBeam/scripts/
+```
+
+首次启动会写入两个内置示例（`01-quick-start.js`、`02-ts-demo.ts`），**已存在的文件不会被覆盖** ——
+你可以放心修改示例，下次启动不会还原。GUI 里可以新建 / 编辑 / 保存 / 删除。
+`$.file` 不受脚本目录限制，可以读任意路径（相对路径按进程工作目录解析）。
+
+### Console 面板
+
+脚本窗口底部是 Console 面板，脚本里的 `console.log/info/debug/warn/error` 会出现在这里
+（GUI 不写标准输出——用户看不到；只有命令行运行时才打到终端）：
+
+* 按等级着色（error 红、warn 琥珀、debug 灰），每行带时间；
+* 面板里还有运行状态行：`▶ 运行 xxx`、`✓ 完成(输出 N 个字符,用时 Xms)`，
+  脚本报错时把引擎的错误原文（含文件名与行列）写成 error 行，中止时写 warn 行；
+* 每次运行前清空 —— 面板永远只属于**这一次**运行，排查时不会被上一轮输出干扰；
+* 上限 1000 行（狂打印也只保留最后 1000 行），可折叠、可按等级过滤、可手动清空；
+* 日志存在后端，关闭再打开脚本窗口时面板会自动恢复。
+
+### 脚本窗口里的确认框
+
+脚本窗口有三处需要用户确认的危险操作（切换脚本 / 新建 / 删除会丢改动），以及「有未保存修改时
+是否先保存再运行」。它们统一走 `@tauri-apps/plugin-dialog` 的 `ask()`，也就是**系统原生 Yes/No 弹框**
+—— 与脚本里 `$.confirm` 的观感一致。
+
+> 注意：这里不能用 `window.confirm()`。Tauri 的 webview 会把它接管成插件调用，
+> 而权限里只放开了消息类弹框，直接调用会抛 `dialog.confirm not allowed. Command not found`。
+> 另外 `dialog:default` 只包含 open/save/message，**不含**消息弹框，必须在
+> `src-tauri/capabilities/default.json` 里显式写 `dialog:allow-ask`（或 `allow-message`）。
+
+### 编辑器能力
+
+脚本窗口里的编辑器用 CodeMirror 6，提供：
+
+- JS/TS 语法高亮、括号匹配、自动缩进、搜索；
+- `$.` / `Clipbeam.` **补全**（数据来自后端能力清单，与运行期注册的能力同源）；
+- **TypeScript 真类型诊断**：用 TypeScript 编译器 API 检查脚本，
+  类型不匹配、拼错方法名、用了运行时不存在的 API 都会在编辑器里标红/标黄；
+- `Cmd/Ctrl+Enter` 运行、`Cmd/Ctrl+S` 保存。
+
+编辑器里的类型提示来自两个声明文件（`crates/*/src/spec/clipbeam.d.ts`），
+它们同时被 `pnpm typecheck:scripts` 使用，因此**编辑器里的断言与命令行检查一致**：
+
+```bash
+pnpm typecheck:scripts    # 用 tsc 检查 scripts/*.ts（不需要装 Node 也能运行脚本本身）
+```
+
+### TypeScript 支持范围
+
+`.ts` / `.mts` / `.cts` 会被自动转译（oxc，进程内，**不需要 Node/tsc**）：
+
+| 支持 | 说明 |
+|---|---|
+| 类型注解 / `interface` / `type` / `as` / 泛型 | 直接剥掉 |
+| `enum` / `namespace` | 转成运行时对象 |
+| 顶层 `await` | 脚本按 module 解析，因此允许 |
+| 现代 JS 语法 | 原样保留，不做 ES 降级 |
+
+| 不支持 | 说明 |
+|---|---|
+| JSX / TSX | 没有 React 运行时，`.tsx` 会明确报错 |
+| 装饰器等需要 helper 的语法 | 明确报错，而不是生成跑不起来的代码 |
+| ESM 的 `import` / `export` 值导入 | 运行时是「全局 + async eval」，`import type` 会被移除，值导入暂不支持 |
+| source map | 运行期报错的**行列号指向转译后的 JS**；语法错误不受影响（诊断直接给 `.ts` 的位置） |
+
+### 安全说明
+
+脚本拥有**与 ClipBeam 同等的本机权限**：`$.file` 可以读任意文件、`$.typeStr` 会把内容
+敲进当前焦点窗口。当前没有沙箱、没有权限提示，请只运行你信任的脚本。
 
 ---
 
@@ -272,6 +426,8 @@ clipbeam send-once      # 立即发送一次本机剪贴板（0.2s 后开始，C
 clipbeam recv-once      # 立即截屏接收，stderr 打印 got/total 进度
 clipbeam deploy-type   # 逐键敲入自解压接收页到当前焦点窗口（先切到远程记事本）
 clipbeam deploy-copy   # 把自解压接收页复制到宿主机剪贴板
+clipbeam script <文件>          # 在终端里运行脚本（.js / .ts，TS 在进程内转译）
+clipbeam script <文件> --raw    # 同上，但按整段写出（不逐字模拟打字节奏）
 ```
 
 ---
@@ -280,10 +436,13 @@ clipbeam deploy-copy   # 把自解压接收页复制到宿主机剪贴板
 
 要求 Rust stable（edition 2021）+ Node.js 18+ + pnpm。
 
-pnpm workspace 单仓多包布局：
+pnpm workspace + cargo workspace 单仓多包布局：
 
-- 仓库根：Tauri 主界面（Vue 3 + Vite + TS + shadcn-vue）
-- `src-tauri/`：Rust crate + Tauri 配置
+- 仓库根：Tauri 主界面（Vue 3 + Vite + TS + shadcn-vue）；`Cargo.toml` 定义 cargo workspace
+- `src-tauri/`：Rust crate + Tauri 配置（`clipbeam_lib` + `clipbeam` 二进制）
+- `crates/clipbeam-script/`：嵌入式脚本引擎（QuickJS + oxc），只提供基础能力与扩展机制
+- `crates/clipbeam-scripting/`：使用方能力集（md5/base32/zstd/typeStr/confirm）+ 脚本目录 + 终端宿主
+- `scripts/`：示例脚本（供命令行运行；内置示例的真源在 `crates/clipbeam-scripting/seed/`）
 - `packages/shared/`：两个 client 共享的协议逻辑（CB1 分帧、base32/CRC、zstd、剪贴板、接收状态机）
 - `packages/client/`：浏览器端 Vue 3 收发页（shadcn-vue + Tailwind v4，开发预览用）
 - `packages/client-vanilla/`：零依赖单文件接收页，构建产物被 Rust `include_str!` 内嵌用于部署
@@ -306,7 +465,8 @@ cd src-tauri && cargo tauri build
 ### macOS：打包成可双击的 .app（推荐）
 
 直接双击裸二进制会打开一个终端窗口，关掉终端程序即退出。用打包脚本生成
-标准应用包，启动无终端、不占 Dock（仅菜单栏图标），与普通 Mac 应用一致：
+标准应用包，启动无终端、平时不占 Dock（仅菜单栏图标；脚本窗口打开期间会临时出现在 Dock），
+与普通 Mac 应用一致：
 
 ```bash
 scripts/package-macos.sh              # 生成 src-tauri/target/release/bundle/macos/ClipBeam.app
@@ -342,11 +502,32 @@ cd src-tauri && cargo check --target x86_64-pc-windows-msvc
 ## 测试
 
 ```bash
+# 整个 workspace（引擎、能力集、Tauri 应用）
+cargo test --workspace
+
+# 新增的两个 crate 是 clippy 干净的；src-tauri / build.rs 里有一批历史告警，
+# 所以这里只对它们跑 clippy（要做全量门禁需先清掉历史告警）
+cargo clippy -p clipbeam-script -p clipbeam-scripting --all-targets
+
+# 只跑脚本引擎与能力集（第一次编译 QuickJS 的 C 代码较慢，之后很快）
+cargo test -p clipbeam-script
+cargo test -p clipbeam-scripting
+
+# Tauri 侧的协议层单元测试与跨实现 E2E
 cd src-tauri
-cargo test             # 14 个单元测试：base32/CRC32/帧解析/组包/自解压引导页等
-cargo clippy --all-targets
+cargo test
 cargo run --example qr_e2e   # JS(qrcode-generator) 产出帧 → Rust(rqrr) 解码的跨实现 E2E
+
+# 前端：构建 + 脚本类型检查
+pnpm build
+pnpm typecheck:scripts
+pnpm lint
 ```
+
+> `cargo test -p clipbeam-script` 覆盖：`$.file` / `$.sleep` / 取消、`TextDecoder` 的
+> GBK/BOM/fatal、扩展机制的注册/重名/声明一致性、TS 转译与端到端；
+> `cargo test -p clipbeam-scripting` 覆盖：md5/base32/zstd 与 Rust 侧独立实现对齐、
+> `typeStr`/`confirm` 的宿主语义、脚本目录与内置示例。
 
 ---
 
@@ -403,7 +584,13 @@ CB1.<total>.<index>.<digest>.<data>
 - **二维码可见性**：多屏环境下会截取所有显示器，二维码出现在任意一块屏幕上
   均可被识别，但该区域需完整可见、未被遮挡/最小化，每屏会降采样到 1600px 宽再解码；
 - **安全**：两条通道都没有也不需要网络连接；CRC32 只防传输错误，不提供机密性，
-  屏幕/键盘内容在本地处理，不上传任何数据。
+  屏幕/键盘内容在本地处理，不上传任何数据；
+- **脚本与本机同权限**：`$.file` 能读任意文件、`$.typeStr` 会把内容敲进当前焦点窗口，
+  目前没有沙箱与权限确认，只运行可信脚本；
+- **`$.confirm` 会一直等**：系统确认框不设超时，弹框期间 Worker 保持忙（其他任务无法启动）。
+  此时按 Esc 只会**终止脚本**，系统弹框仍留在屏幕上，需要手动点掉；
+- **弹框时主窗口会临时显形**：托盘模式下主窗口是隐藏的，而系统弹框需要应用处于激活状态，
+  因此确认期间主窗口会短暂显示并获得焦点，回答后恢复隐藏。
 
 ## 技术栈
 
@@ -417,4 +604,6 @@ CB1.<total>.<index>.<digest>.<data>
 | 截屏 / 二维码 | xcap、rqrr、image |
 | 编码 / 压缩 / 配置 / CLI | data-encoding、zstd（协议 A 压缩）、serde/serde_json、dirs、clap |
 | 通知 | mac-notification-sys（macOS）、winrt-notification（Windows） |
+| 脚本引擎 | QuickJS（rquickjs 0.14）、TypeScript → JavaScript 转译（oxc 0.150，进程内，不需要 Node） |
+| 脚本编辑器 | CodeMirror 6（高亮 + `$` 补全 + TypeScript 编译器 API 做类型诊断） |
 | 远程页 | 原生 JS 单文件，内联 qrcode-generator + fzstd（zstd 解压），零运行时依赖（不参与构建） |

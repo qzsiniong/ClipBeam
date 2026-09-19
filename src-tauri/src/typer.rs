@@ -51,6 +51,11 @@ impl Typer {
         })
     }
 
+    /// 当前是否真的发送按键（false = 演练，只统计进度不注入事件）。
+    pub fn send_real_keys(&self) -> bool {
+        self.send_real_keys
+    }
+
     /// 等待指定延迟。
     fn wait_delay(&self) {
         if self.delay > Duration::ZERO {

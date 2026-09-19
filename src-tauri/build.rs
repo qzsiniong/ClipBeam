@@ -223,7 +223,7 @@ fn main() {
     let icons_dir = manifest_dir.join("icons");
     std::fs::create_dir_all(&icons_dir).unwrap();
 
-    write_png_if_changed(&icons_dir.join("32x32.png"), &render(1), (BASE * 1) as u32);
+    write_png_if_changed(&icons_dir.join("32x32.png"), &render(1), BASE as u32);
     write_png_if_changed(
         &icons_dir.join("128x128.png"),
         &render(2),

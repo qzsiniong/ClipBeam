@@ -10,6 +10,10 @@ const ignores = [
   'src-tauri/gen/**',
   '.trae/**',
   'README.md',
+  // Rust crate 里的脚本是「内嵌示例」与引擎前置脚本，不走前端 lint：
+  // - crates/clipbeam-script/src/prelude.js：引擎前置脚本（与用户脚本同源）
+  // - crates/clipbeam-scripting/seed/*：内置示例脚本
+  'crates/**',
 ]
 
 export default antfu({

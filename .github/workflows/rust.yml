@@ -11,12 +11,39 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+
+      # 仓库根的 Cargo.toml 是 workspace：`cargo build` / `cargo test` 会覆盖
+      # crates/clipbeam-script（QuickJS 的 C 代码 + oxc，都是纯编译期依赖）与 src-tauri。
+      - name: Install C toolchain for QuickJS
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      # src-tauri/build.rs 用 include_str! 内嵌 packages/client-vanilla/dist/index.html，
+      # 缺失/过期时它会尝试调用 pnpm。CI 里先自己构建一次，再用环境变量让它跳过。
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build receiver page (embedded by build.rs)
+        run: pnpm build:web
+
       - name: Build
-        run: cargo build --verbose
+        run: cargo build --workspace --verbose
+        env:
+          CLIPBEAM_SKIP_WEB_BUILD: '1'
+
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --workspace --verbose
+        env:
+          CLIPBEAM_SKIP_WEB_BUILD: '1'

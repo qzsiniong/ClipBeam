@@ -18,6 +18,7 @@ pub const M_SEND: &str = "send";
 pub const M_RECV: &str = "recv";
 pub const M_DEPLOY_TYPE: &str = "deploy_type";
 pub const M_DEPLOY_COPY: &str = "deploy_copy";
+pub const M_SCRIPTS: &str = "scripts";
 pub const M_SETTINGS: &str = "settings";
 pub const M_QUIT: &str = "quit";
 
@@ -58,6 +59,9 @@ pub fn build(app: &App, cfg: &Config) -> tauri::Result<()> {
     )
     .icon(icon_deploy_copy())
     .build(app)?;
+    let scripts = IconMenuItemBuilder::with_id(M_SCRIPTS, "运行脚本…")
+        .icon(icon_scripts())
+        .build(app)?;
     let settings = IconMenuItemBuilder::with_id(M_SETTINGS, "设置…")
         .icon(icon_settings())
         .build(app)?;
@@ -76,6 +80,7 @@ pub fn build(app: &App, cfg: &Config) -> tauri::Result<()> {
         .item(&deploy_type)
         .separator()
         .item(&deploy_copy)
+        .item(&scripts)
         .item(&settings)
         .separator()
         .item(&quit)
@@ -83,7 +88,7 @@ pub fn build(app: &App, cfg: &Config) -> tauri::Result<()> {
 
     let icon = app
         .default_window_icon()
-        .map(|i| i.clone())
+        .cloned()
         .unwrap_or_else(|| Image::new(&[], 1, 1));
 
     TrayIconBuilder::with_id("main")
@@ -334,6 +339,22 @@ fn icon_deploy_copy() -> Image<'static> {
         // 顶部夹子(开口朝下的 U)
         ico_round(img, 12, 2, 19, 8, 2, c);
         ico_rect(img, 14, 4, 17, 8, clear);
+    })
+}
+
+/// 运行脚本:琥珀色代码文档(外框 + 左侧竖线 + 两行代码条)。
+fn icon_scripts() -> Image<'static> {
+    menu_icon(|img| {
+        let c = Rgba([217, 119, 6, 255]); // amber-600
+        let clear = Rgba([0, 0, 0, 0]);
+        ico_round(img, 5, 4, 27, 28, 3, c);
+        ico_round(img, 7, 6, 25, 26, 2, clear);
+        // 代码左侧的「行号」竖线
+        ico_rect(img, 9, 9, 10, 23, c);
+        // 两行代码条
+        ico_rect(img, 13, 11, 23, 13, c);
+        ico_rect(img, 13, 16, 21, 18, c);
+        ico_rect(img, 13, 21, 23, 23, c);
     })
 }
 

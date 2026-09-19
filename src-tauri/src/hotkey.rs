@@ -1,8 +1,8 @@
-//! 全局热键:用 `tauri-plugin-global-shortcut` 替代裸 `global-hotkey` crate。
-//! 动态注册,避免空闲时拦截 Esc 等单键影响其他应用:
-//! - 空闲:仅注册 send/recv 触发键(stop/Esc 不注册,透传给前台应用);
-//! - 忙时:注销触发键,改注册 stop(Esc)+ 当前任务热键(再按即停),二者均取消任务。
-//! 启动失败通过系统通知反馈。
+// ! 全局热键:用 `tauri-plugin-global-shortcut` 替代裸 `global-hotkey` crate。
+// ! 动态注册,避免空闲时拦截 Esc 等单键影响其他应用:
+// ! - 空闲:仅注册 send/recv 触发键(stop/Esc 不注册,透传给前台应用);
+// ! - 忙时:注销触发键,改注册 stop(Esc)+ 当前任务热键(再按即停),二者均取消任务。
+// ! 启动失败通过系统通知反馈。
 
 use crate::{commands, config::Config, notify, worker};
 use tauri::{async_runtime::spawn, AppHandle, Manager};
@@ -40,7 +40,8 @@ pub fn set_mode(app: &AppHandle, cfg: &Config, mode: HotkeyMode) -> GsResult<()>
                 worker::TaskKind::Recv => {
                     gs.on_shortcut(cfg.recv_hotkey.as_str(), on_cancel)?;
                 }
-                worker::TaskKind::DeployType => {}
+                // 部署与脚本没有独立触发热键:忙时只保留中止键
+                worker::TaskKind::DeployType | worker::TaskKind::Script => {}
             }
         }
     }

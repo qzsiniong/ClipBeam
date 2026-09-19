@@ -47,7 +47,7 @@ pub fn b32_decode(input: &str) -> Result<Vec<u8>, String> {
     // 无填充 base32 合法长度 mod 8 ∈ {0,2,4,5,7}；末尾补 = 供解码。
     let pad = (8 - norm.len() % 8) % 8;
     let mut padded = norm;
-    padded.extend(std::iter::repeat('=').take(pad));
+    padded.extend(std::iter::repeat_n('=', pad));
     BASE32_NOPAD
         .decode(padded.trim_end_matches('=').as_bytes())
         .map_err(|e| format!("base32 解码失败: {e}"))

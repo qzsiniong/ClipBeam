@@ -5,7 +5,7 @@ import { MousePointerClick } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Button } from '@/components/ui/button'
 
-const kind = ref<'send' | 'recv' | 'deploytype' | null>(null)
+const kind = ref<'send' | 'recv' | 'deploytype' | 'script' | null>(null)
 const hotkey = ref('')
 const countdown = ref(10)
 const cancelled = ref(false)
@@ -18,14 +18,19 @@ const kindLabel = computed(() => {
     send: '发送到远程',
     recv: '截屏接收',
     deploytype: '部署接收页',
+    script: '运行脚本',
   }
   return kind.value ? map[kind.value] : ''
 })
 
 onMounted(async () => {
   const win = getCurrentWindow()
+  // 待命事件只属于待命窗口：其它窗口跑的是同一套 Vue 应用，按 label 兜一道，
+  // 避免以后事件改成广播时误触发（见 lib.rs / standby.rs 里的 emit_to 修复）。
+  if (win.label !== 'standby')
+    return
 
-  unlistens.push(await listen<{ kind: 'send' | 'recv' | 'deploytype', hotkey: string }>('standby-config', (e) => {
+  unlistens.push(await listen<{ kind: 'send' | 'recv' | 'deploytype' | 'script', hotkey: string }>('standby-config', (e) => {
     kind.value = e.payload.kind
     hotkey.value = e.payload.hotkey
     countdown.value = 10

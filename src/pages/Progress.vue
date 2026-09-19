@@ -6,11 +6,13 @@ import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 interface ProgressPayload {
-  kind: 'send' | 'recv' | 'deploytype'
+  kind: 'send' | 'recv' | 'deploytype' | 'script'
   got: number
   total: number
   started_at: number
   ts: number
+  /** 脚本任务当前输出的片段(其它任务为空)。 */
+  snippet?: string
 }
 
 interface TaskOutcome {
@@ -24,6 +26,8 @@ const total = ref(0)
 const startedAt = ref(0)
 const now = ref(Date.now())
 const finished = ref<TaskOutcome | null>(null)
+/** 脚本任务当前输出的片段（进度条下方展示）。 */
+const snippet = ref('')
 const cancelled = ref(false)
 const isBusy = ref(false)
 
@@ -81,6 +85,7 @@ const titleText = computed(() => {
     send: '发送',
     recv: '接收',
     deploytype: '部署',
+    script: '脚本',
   }
   return kind.value ? map[kind.value] : ''
 })
@@ -127,6 +132,7 @@ onMounted(async () => {
       startedAt.value = 0
       finished.value = null
       cancelled.value = false
+      snippet.value = ''
       clearHide()
       startTick()
     }),
@@ -138,6 +144,7 @@ onMounted(async () => {
       got.value = p.got
       total.value = p.total
       startedAt.value = p.started_at
+      snippet.value = p.snippet ?? ''
       now.value = Date.now()
     }),
   )
@@ -192,6 +199,15 @@ onUnmounted(() => {
         <span v-if="remainingMs > 0">剩余{{ fmtDuration(remainingMs) }}</span>
         <span>已用{{ fmtDuration(elapsedMs) }}</span>
       </div>
+    </div>
+
+    <!-- 脚本输出片段（脚本任务才有） -->
+    <div
+      v-if="isBusy && snippet"
+      class="max-w-[160px] truncate text-[10px] text-muted-foreground"
+      :title="snippet"
+    >
+      正在输出：{{ snippet }}
     </div>
 
     <!-- 进行中但未收到进度 -->

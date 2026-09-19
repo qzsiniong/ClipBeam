@@ -5,7 +5,8 @@
   "windows": [
     "main",
     "progress",
-    "standby"
+    "standby",
+    "scripting"
   ],
   "permissions": [
     "core:default",
@@ -17,6 +18,7 @@
     "core:window:allow-destroy",
     "core:window:allow-current-monitor",
     "core:window:allow-set-position",
+    "dialog:allow-ask",
     "core:tray:default",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",

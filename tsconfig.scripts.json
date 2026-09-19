@@ -1,0 +1,33 @@
+{
+  // scripts/ 下脚本的类型检查配置（与运行时真源对齐）。
+  //
+  // 为什么单独一份：根 tsconfig 走 project references（app/node），只覆盖 src/ 与前端代码；
+  // 而脚本既要在编辑器里获得 `Clipbeam` / `$` / `TextDecoder` 的类型提示，又要能被
+  // `tsc --noEmit` 单独检查。两个 crate 的 .d.ts 是「能力真源」，直接 include 进来。
+  "compilerOptions": {
+    // 顶层 await 需要 module 为 esnext 且 target >= es2017
+    "target": "ES2022",
+
+    // 只加载纯 ECMAScript 标准库：故意不引入 DOM，避免作者误用
+    // fetch / document 这类运行时不存在的 API。
+    "lib": ["ESNext"],
+    // 关键：把每个脚本当成模块（而不是全局脚本）。
+    // 这样脚本里的 `const $ = Clipbeam` 是模块内绑定，合法地遮蔽全局声明，
+    // 不会报 TS2451 重复声明。
+    "moduleDetection": "force",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [],
+
+    "allowJs": false,
+    "strict": true,
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "scripts/**/*.ts",
+    "crates/clipbeam-script/src/spec/clipbeam.d.ts",
+    "crates/clipbeam-scripting/src/spec/clipbeam.d.ts"
+  ]
+}

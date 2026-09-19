@@ -21,6 +21,18 @@
         "hiddenTitle": true
       },
       {
+        "label": "scripting",
+        "title": "ClipBeam 脚本",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 760,
+        "minHeight": 520,
+        "resizable": true,
+        "visible": false,
+        "hiddenTitle": true,
+        "url": "index.html#/scripting"
+      },
+      {
         "label": "progress",
         "title": "ClipBeam 任务进度",
         "width": 360,
