@@ -6,21 +6,37 @@
   * 之后增量听 `script-console` 事件，`script-console-clear` 清空。
 
   后端缓冲上限 1000 行（见 src-tauri/src/console_panel.rs），面板只负责渲染与过滤。
+
+  形态（`view`，由父组件 `ScriptsWindow` 持有并决定外层布局）：
+  * `normal`：占 Splitter 下栏，可拖拽调整高度；
+  * `collapsed`：只剩标题栏；
+  * `maximized`：占满整个编辑区（编辑器仍挂载，只是被压到 0 高，避免丢撤销历史）。
 -->
 <script setup lang="ts">
 import type { UnlistenFn } from '@tauri-apps/api/event'
+import type { ConsoleView } from '@/components/console-view'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { ChevronDown, ChevronUp, Eraser, Terminal } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Eraser, Maximize2, Minimize2, Terminal } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 
 /** 一行输出（对应后端 `ConsoleLine`）。 */
 interface ConsoleLine { seq: number, level: string, text: string, ts: number }
 
+const props = withDefaults(defineProps<{ view?: ConsoleView }>(), { view: 'normal' })
+const emit = defineEmits<{ 'update:view': [ConsoleView] }>()
+
 const lines = ref<ConsoleLine[]>([])
-const collapsed = ref(false)
 const filter = ref<'all' | 'log' | 'info' | 'debug' | 'warn' | 'error'>('all')
+
+const collapsed = computed(() => props.view === 'collapsed')
+const maximized = computed(() => props.view === 'maximized')
+
+/** 切换形态：折叠/最大化是互斥的，回到 normal 表示恢复。 */
+function setView(next: ConsoleView) {
+  emit('update:view', props.view === next ? 'normal' : next)
+}
 
 const scroller = ref<HTMLDivElement | null>(null)
 /**
@@ -186,8 +202,8 @@ watch(collapsed, (value) => {
 
 <template>
   <section
-    class="flex shrink-0 flex-col overflow-hidden border-t"
-    :class="collapsed ? '' : 'h-52'"
+    class="flex h-full min-h-0 flex-col overflow-hidden"
+    :class="view === 'normal' ? '' : 'border-t'"
   >
     <!-- 工具栏 -->
     <div class="flex h-9 shrink-0 items-center gap-2 px-3 text-xs">
@@ -209,12 +225,21 @@ watch(collapsed, (value) => {
           <Eraser class="h-3.5 w-3.5" />
         </Button>
         <Button
+          v-if="!maximized"
           size="icon-xs"
           variant="ghost"
           :title="collapsed ? '展开' : '折叠'"
-          @click="collapsed = !collapsed"
+          @click="setView('collapsed')"
         >
           <component :is="collapsed ? ChevronUp : ChevronDown" class="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          :title="maximized ? '还原（回到可拖拽的高度）' : '最大化（占满整个编辑区）'"
+          @click="setView('maximized')"
+        >
+          <component :is="maximized ? Minimize2 : Maximize2" class="h-3.5 w-3.5" />
         </Button>
       </div>
     </div>

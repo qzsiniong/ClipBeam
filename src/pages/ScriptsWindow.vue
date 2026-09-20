@@ -11,6 +11,7 @@
 -->
 <script setup lang="ts">
 import type { UnlistenFn } from '@tauri-apps/api/event'
+import type { ConsoleView } from '@/components/console-view'
 import type { CapabilityList, NamespaceNames } from '@/lib/clipbeam-script/autocomplete'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -23,6 +24,7 @@ import ScriptEditor from '@/components/ScriptEditor.vue'
 import ScriptsSidebar from '@/components/ScriptsSidebar.vue'
 import ShortcutHelp from '@/components/ShortcutHelp.vue'
 import { Button } from '@/components/ui/button'
+import { SplitterGroup, SplitterPanel, SplitterResizeHandle } from '@/components/ui/splitter'
 import { formatShortcut, isMac, RUN_KEY, SAVE_KEY } from '@/lib/clipbeam-script/shortcuts'
 
 interface ScriptMeta { name: string, path: string, language: 'js' | 'ts' }
@@ -42,6 +44,18 @@ const lastError = ref<string | null>(null)
 
 /** 窗口是否置顶（脚本窗口需要长时间停留，常和别的窗口并排用）。 */
 const alwaysOnTop = ref(false)
+
+/**
+ * Console 面板的形态（三种，互斥）：
+ *
+ * * `normal`：Splitter 的下栏，可拖拽调高度（高度记在 localStorage，见 `auto-save-id`）；
+ * * `collapsed`：只剩标题栏；
+ * * `maximized`：占满整个编辑区。
+ *
+ * 三种形态共用同一棵组件树：切换靠 CSS 覆盖 Splitter 的 flex 尺寸（模板里的 `!` 类），
+ * 而不是 `v-if` —— 这样 CodeMirror 不会被卸载，撤销历史与光标位置都还在。
+ */
+const consoleView = ref<ConsoleView>('normal')
 
 const unlistens: UnlistenFn[] = []
 
@@ -326,31 +340,65 @@ function warnUnsaved(event: BeforeUnloadEvent) {
         <pre class="whitespace-pre-wrap break-words">{{ lastError }}</pre>
       </div>
 
-      <!-- 编辑器 + Console -->
-      <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div class="min-h-0 flex-1 overflow-hidden">
-          <ScriptEditor
-            v-if="currentName"
-            v-model="source"
-            :language="currentLanguage"
-            :script-name="currentName"
-            :capabilities="capabilities"
-            :namespace-names="namespaceNames"
-            :readonly="busy"
-            @run="run"
-            @save="save"
-          />
-          <div v-else class="flex h-full flex-col items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
-            <span>左侧选择一个脚本，或新建一个</span>
-            <span v-if="scriptsDir" class="text-xs">目录：<code class="rounded bg-muted px-1 py-0.5">{{ scriptsDir }}</code></span>
-            <span class="text-xs">
-              {{ runKeyLabel }} 运行 · {{ saveKeyLabel }} 保存 · 其它快捷键见右上角 ⌨
-            </span>
+      <!-- 编辑器 + Console：三种形态共用同一棵树，切换只改 Splitter 的 flex 尺寸（见脚本里的说明） -->
+      <SplitterGroup
+        class="flex min-h-0 flex-1 flex-col overflow-hidden"
+        direction="vertical"
+        auto-save-id="clipbeam.scripting.console"
+        :keyboard-resize-by="16"
+      >
+        <!-- 编辑器：最大化时被压到 0 高（仍挂载，保住撤销历史） -->
+        <SplitterPanel
+          :min-size="25"
+          class="min-h-0 overflow-hidden"
+          :class="consoleView === 'maximized' ? 'shrink-0! grow-0! basis-0!' : ''"
+        >
+          <div class="h-full min-h-0 overflow-hidden">
+            <ScriptEditor
+              v-if="currentName"
+              v-model="source"
+              :language="currentLanguage"
+              :script-name="currentName"
+              :capabilities="capabilities"
+              :namespace-names="namespaceNames"
+              :readonly="busy"
+              @run="run"
+              @save="save"
+            />
+            <div v-else class="flex h-full flex-col items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
+              <span>左侧选择一个脚本，或新建一个</span>
+              <span v-if="scriptsDir" class="text-xs">目录：<code class="rounded bg-muted px-1 py-0.5">{{ scriptsDir }}</code></span>
+              <span class="text-xs">
+                {{ runKeyLabel }} 运行 · {{ saveKeyLabel }} 保存 · 其它快捷键见右上角 ⌨
+              </span>
+            </div>
           </div>
-        </div>
+        </SplitterPanel>
 
-        <ConsolePanel />
-      </div>
+        <!-- 拖拽条：只在 normal 形态可用（最大化/折叠时尺寸由固定规则决定，不给拖） -->
+        <SplitterResizeHandle
+          v-show="consoleView === 'normal'"
+          :tabindex="0"
+          aria-label="调整 Console 高度（方向键微调，拖动调整）"
+          title="拖动调整 Console 高度"
+        />
+
+        <!-- Console：collapsed 固定 36px（标题栏），maximized 占满剩余 -->
+        <SplitterPanel
+          size-unit="px"
+          :default-size="208"
+          :min-size="72"
+          :max-size="480"
+          class="min-h-0 overflow-hidden"
+          :class="consoleView === 'collapsed'
+            ? 'shrink-0! grow-0! basis-9!'
+            : consoleView === 'maximized'
+              ? 'grow-1! basis-0!'
+              : ''"
+        >
+          <ConsolePanel v-model:view="consoleView" />
+        </SplitterPanel>
+      </SplitterGroup>
     </div>
   </div>
 </template>
