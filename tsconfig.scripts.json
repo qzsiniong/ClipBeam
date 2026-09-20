@@ -1,9 +1,13 @@
 {
-  // scripts/ 下脚本的类型检查配置（与运行时真源对齐）。
+  // 脚本类型检查配置（与运行时真源对齐）：内置示例（seed/）+ 两份能力声明。
   //
   // 为什么单独一份：根 tsconfig 走 project references（app/node），只覆盖 src/ 与前端代码；
-  // 而脚本既要在编辑器里获得 `Clipbeam` / `$` / `TextDecoder` 的类型提示，又要能被
+  // 而脚本既要在编辑器里获得 `ClipBeam` / `$` / `TextDecoder` 的类型提示，又要能被
   // `tsc --noEmit` 单独检查。两个 crate 的 .d.ts 是「能力真源」，直接 include 进来。
+  //
+  // 顺带说明：crates/tsconfig.json 也 include 了这两个声明文件（同样 lib: ESNext）。
+  // 它的存在只是为了让编辑器用「脚本环境」项目去拥有它们 —— 否则编辑器会用带 DOM 的
+  // inferred project，把 TextDecoder / console 判成重复标识符。
   "compilerOptions": {
     // 顶层 await 需要 module 为 esnext 且 target >= es2017
     "target": "ES2022",
@@ -12,7 +16,8 @@
     // fetch / document 这类运行时不存在的 API。
     "lib": ["ESNext"],
     // 关键：把每个脚本当成模块（而不是全局脚本）。
-    // 这样脚本里的 `const $ = Clipbeam` 是模块内绑定，合法地遮蔽全局声明，
+    // 这样脚本里 `const $ = ClipBeam` 这类写法是模块内绑定（不过现在 `$` 是不可写全局，
+    // 通常直接用全局即可），
     // 不会报 TS2451 重复声明。
     "moduleDetection": "force",
     "module": "ESNext",
@@ -26,8 +31,8 @@
     "skipLibCheck": true
   },
   "include": [
-    "scripts/**/*.ts",
-    "crates/clipbeam-script/src/spec/clipbeam.d.ts",
+    "crates/clipbeam-scripting/seed/*.ts",
+    "crates/script-engine/src/spec/engine.d.ts",
     "crates/clipbeam-scripting/src/spec/clipbeam.d.ts"
   ]
 }

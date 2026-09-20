@@ -4,14 +4,14 @@
   布局：左侧 aside 侧边栏（脚本列表/新建/跳主窗口） + 右侧「工具栏 + 编辑器 + Console」。
 
   运行语义（与 src-tauri/src/worker.rs 一致）：
-  * 只有**会输出**的脚本才需要待命窗口：静态判定到 `.typeStr` 时提前弹，
+  * 只有**会输出**的脚本才需要待命窗口：静态判定到 `.type_str` 时提前弹，
     真正开始输出前还有一次惰性兜底（见 src-tauri/src/standby.rs）；纯计算脚本直接跑完；
   * `$.confirm` 弹系统原生确认框（tauri-plugin-dialog），不回答就一直等；
   * `console.*` 与运行状态行都进底部 Console 面板（见 src-tauri/src/console_panel.rs）。
 -->
 <script setup lang="ts">
 import type { UnlistenFn } from '@tauri-apps/api/event'
-import type { Capability } from '@/lib/clipbeam-script/autocomplete'
+import type { CapabilityList, NamespaceNames } from '@/lib/clipbeam-script/autocomplete'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -21,13 +21,17 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ConsolePanel from '@/components/ConsolePanel.vue'
 import ScriptEditor from '@/components/ScriptEditor.vue'
 import ScriptsSidebar from '@/components/ScriptsSidebar.vue'
+import ShortcutHelp from '@/components/ShortcutHelp.vue'
 import { Button } from '@/components/ui/button'
+import { formatShortcut, isMac, RUN_KEY, SAVE_KEY } from '@/lib/clipbeam-script/shortcuts'
 
 interface ScriptMeta { name: string, path: string, language: 'js' | 'ts' }
 interface TaskOutcome { title: string, body: string }
 
 const scripts = ref<ScriptMeta[]>([])
-const capabilities = ref<Capability[]>([])
+const capabilities = ref<CapabilityList['capabilities']>([])
+/** 能力命名空间的名字（后端下发，前端不写死）。 */
+const namespaceNames = ref<NamespaceNames>({ namespace: '', alias: '' })
 const scriptsDir = ref('')
 const currentName = ref<string | null>(null)
 const source = ref('')
@@ -43,6 +47,16 @@ const unlistens: UnlistenFn[] = []
 
 const dirty = computed(() => currentName.value !== null && source.value !== savedSource.value)
 const currentLanguage = computed<'js' | 'ts'>(() => currentName.value?.endsWith('.ts') ? 'ts' : 'js')
+
+/**
+ * 按钮上的快捷键提示（按平台格式化）。
+ *
+ * 与编辑器真实绑定共用 `shortcuts.ts` 的键位串：`RUN_KEY` / `SAVE_KEY` 既用于
+ * `editorKeymap()`，也用在这里和快捷键面板里，改一处不会漏另一处。
+ */
+const mac = isMac()
+const runKeyLabel = formatShortcut({ keys: RUN_KEY, label: '运行脚本' }, mac)
+const saveKeyLabel = formatShortcut({ keys: SAVE_KEY, label: '保存脚本' }, mac)
 
 /**
  * 需要用户确认的危险操作（切换/新建/删除会丢改动）用**系统原生**询问框。
@@ -70,7 +84,9 @@ async function loadList() {
 
 async function loadCapabilities() {
   try {
-    capabilities.value = await invoke<Capability[]>('list_capabilities')
+    const list = await invoke<CapabilityList>('list_capabilities')
+    capabilities.value = list.capabilities
+    namespaceNames.value = { namespace: list.namespace, alias: list.alias }
   }
   catch (e) {
     lastError.value = String(e)
@@ -155,7 +171,9 @@ async function remove(name: string) {
 }
 
 async function run() {
-  if (!currentName.value)
+  // 忙态下按钮是 disabled，键盘路径也要保持一致：否则会打到后端并弹出
+  // 「已有任务在运行」这种看不懂的错误条
+  if (!currentName.value || busy.value)
     return
   if (dirty.value) {
     const doSave = await askUser('脚本有未保存的修改。先保存再运行吗？（否 = 直接运行已保存的版本）')
@@ -264,7 +282,7 @@ function warnUnsaved(event: BeforeUnloadEvent) {
         <span v-if="busy" class="text-xs text-primary">运行中…</span>
 
         <div class="ml-auto flex items-center gap-2">
-          <Button size="sm" :disabled="busy || !currentName" @click="run">
+          <Button size="sm" :disabled="busy || !currentName" :title="`运行（${runKeyLabel}）`" @click="run">
             <Play class="h-4 w-4" />
             运行
           </Button>
@@ -272,10 +290,17 @@ function warnUnsaved(event: BeforeUnloadEvent) {
             <Square class="h-4 w-4" />
             中止
           </Button>
-          <Button size="sm" variant="outline" :disabled="!currentName || !dirty" @click="save">
+          <Button
+            size="sm"
+            variant="outline"
+            :disabled="!currentName || !dirty"
+            :title="`保存（${saveKeyLabel}）`"
+            @click="save"
+          >
             <Save class="h-4 w-4" />
             保存
           </Button>
+          <ShortcutHelp />
           <Button
             size="sm"
             :variant="alwaysOnTop ? 'secondary' : 'ghost'"
@@ -310,6 +335,7 @@ function warnUnsaved(event: BeforeUnloadEvent) {
             :language="currentLanguage"
             :script-name="currentName"
             :capabilities="capabilities"
+            :namespace-names="namespaceNames"
             :readonly="busy"
             @run="run"
             @save="save"
@@ -317,6 +343,9 @@ function warnUnsaved(event: BeforeUnloadEvent) {
           <div v-else class="flex h-full flex-col items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
             <span>左侧选择一个脚本，或新建一个</span>
             <span v-if="scriptsDir" class="text-xs">目录：<code class="rounded bg-muted px-1 py-0.5">{{ scriptsDir }}</code></span>
+            <span class="text-xs">
+              {{ runKeyLabel }} 运行 · {{ saveKeyLabel }} 保存 · 其它快捷键见右上角 ⌨
+            </span>
           </div>
         </div>
 

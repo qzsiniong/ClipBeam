@@ -1,0 +1,27 @@
+[package]
+name = "script-engine"
+version = "0.1.0"
+edition = "2021"
+description = "可嵌入的 QuickJS 脚本引擎：JS/TS 执行、标准全局与能力扩展机制（不含任何宿主/业务语义）"
+license = "MIT"
+
+[dependencies]
+# QuickJS 绑定。futures = 异步运行时（AsyncRuntime/AsyncContext/Promise），
+# array-buffer = ArrayBuffer 支持（0.14 起不再包含在 full 里）
+rquickjs = { version = "0.14", features = ["futures", "array-buffer"] }
+# 异步等待（sleep）与任务调度
+tokio = { version = "1", features = ["rt", "time", "macros"] }
+# 应用层错误包装
+anyhow = "1"
+# WHATWG 编码实现：TextDecoder 支持 gbk / gb18030 / big5 / shift_jis 等全部标签
+encoding_rs = "0.8"
+# TypeScript → JavaScript：只做语法转译（剥类型、转 enum/namespace），不做 ES 降级。
+# 注意：oxc 系列由上游统一发版，必须保持同一版本。
+oxc_allocator = "0.150"
+oxc_parser = "0.150"
+oxc_span = "0.150"
+oxc_semantic = "0.150"
+oxc_transformer = "0.150"
+oxc_codegen = "0.150"
+# 渲染带文件名/行列/源码片段的诊断信息
+oxc_diagnostics = "0.150"

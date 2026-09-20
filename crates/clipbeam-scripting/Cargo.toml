@@ -2,23 +2,30 @@
 name = "clipbeam-scripting"
 version = "0.1.0"
 edition = "2021"
-description = "ClipBeam 的脚本能力集：把 MD5 / Base32 / Zstd / 键盘输出 / 确认以扩展形式注入 clipbeam-script"
+description = "ClipBeam 的脚本能力集：把编解码 / 摘要 / 压缩 / 文件系统 / 宿主交互以扩展形式注入 script-engine"
 license = "MIT"
 
 [dependencies]
-clipbeam-script = { path = "../clipbeam-script" }
-# 写扩展本体需要 rquickjs 的类型；features 必须与 clipbeam-script 保持一致
+script-engine = { path = "../script-engine" }
+# 写扩展本体需要 rquickjs 的类型；features 必须与 script-engine 保持一致
 rquickjs = { version = "0.14", features = ["futures", "array-buffer"] }
 tokio = { version = "1", features = ["rt", "time", "macros", "rt-multi-thread"] }
 anyhow = "1"
 # 摘要（crate 名 md-5，库名 md5）
 md-5 = "0.11"
+# CRC-32（IEEE）
+crc32fast = "1"
 # 十六进制编码
 hex = "0.4"
-# 纯 Rust Zstandard 实现
-zstandard = "0.1"
-# RFC4648 无填充 base32（与 src-tauri 的 protocol 同源，行为一致）
+# RFC4648 base32 / base64（与 src-tauri 的 protocol 同源，行为一致）
 data-encoding = "2"
+# `$.str` / `$.read_text` 的编码表（与引擎的 TextDecoder 同一张 WHATWG 表）
+encoding_rs = "0.8"
+# 纯 Rust 压缩实现：zstd / gzip / brotli / xz
+zstandard = "0.1"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+brotli = "8"
+lzma-rs = "0.3"
 # 脚本目录 config_dir/ClipBeam/scripts
 dirs = "5"
 serde = { version = "1", features = ["derive"] }

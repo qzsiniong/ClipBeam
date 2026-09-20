@@ -3,12 +3,15 @@
 //! 这些 API 是 `prelude.js` 用 Rust 原语补出来的，所以测试从 JS 侧走公开 API，
 //! 校验的是完整的「JS 壳 + Rust 实现」链路。
 
-use clipbeam_script::{RuntimeOptions, ScriptRuntime};
-use clipbeam_scripting::runtime_options;
+use std::sync::Arc;
 
-/// 建一个装了 ClipBeam 能力集的运行时（文本编解码不依赖宿主）。
+use clipbeam_scripting::{runtime_options, NoopHost};
+use script_engine::{ConsoleHook, RuntimeOptions, ScriptRuntime, StdoutConsole};
+
+/// 建一个装了 ClipBeam 能力集的运行时（文本编解码不依赖宿主，所以给个空宿主）。
 async fn runtime() -> ScriptRuntime {
-    ScriptRuntime::with_options(runtime_options())
+    let console: Arc<dyn ConsoleHook> = Arc::new(StdoutConsole);
+    clipbeam_scripting::create_runtime(Arc::new(NoopHost), console, None)
         .await
         .expect("创建运行时失败")
 }
@@ -218,5 +221,11 @@ fn extensions_are_opt_in() {
         RuntimeOptions::default().extensions.is_empty(),
         "core 默认不应包含使用方扩展"
     );
-    assert_eq!(runtime_options().extensions.len(), 5);
+    let console: Arc<dyn ConsoleHook> = Arc::new(StdoutConsole);
+    assert_eq!(
+        runtime_options(Arc::new(NoopHost), console)
+            .extensions
+            .len(),
+        14
+    );
 }

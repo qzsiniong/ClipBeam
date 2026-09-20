@@ -1,17 +1,19 @@
 //! 供命令行复用的引擎入口。
 //!
-//! 应用（`src-tauri`）的 GUI 路径复用 [`run_script`] 即可拿到完全一致的行为；
-//! 区别只在注入哪个 [`ScriptHost`](clipbeam_script::ScriptHost)。
+//! 应用（`src-tauri`）的 GUI 路径复用 [`run_source`] 即可拿到完全一致的行为；
+//! 区别只在注入哪个 [`ScriptHost`](crate::ScriptHost) 与 `ConsoleHook`。
 
 pub mod cli_host;
 
 pub use cli_host::CliScriptHost;
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
-use clipbeam_script::{CancellationToken, ScriptHost, ScriptRuntime};
+use script_engine::{CancelSignal, ConsoleHook, StdoutConsole};
 
+use crate::host::ScriptHost;
 use crate::{runtime_options, ts, ts::is_typescript};
 
 /// 一次脚本执行的结果。
@@ -38,23 +40,21 @@ pub fn load_script(path: &Path) -> Result<String, String> {
     ts::transpile(&source, path).map_err(|err| err.to_string())
 }
 
-/// 在引擎里跑一段已经准备好的脚本源码。
+/// 在引擎里跑一段已经准备好的脚本源码（`console.*` 写标准流）。
 ///
-/// `name` 只影响错误信息里的文件名；`host` 决定 `$.typeStr` / `$.confirm` 落到哪儿。
+/// `name` 只影响错误信息里的文件名；`host` 决定 `$.type_str` / `$.confirm` /
+/// 文件授权落到哪儿。
 pub async fn run_source(
     name: &str,
     source: &str,
-    host: std::sync::Arc<dyn ScriptHost>,
-    cancel: CancellationToken,
+    host: Arc<dyn ScriptHost>,
+    cancel: CancelSignal,
 ) -> Result<(), String> {
-    let runtime = ScriptRuntime::with_options(
-        runtime_options()
-            .script_name(name)
-            .host(host)
-            .cancel_token(cancel),
-    )
-    .await
-    .map_err(|err| format!("创建脚本引擎失败：{err}"))?;
+    let console: Arc<dyn ConsoleHook> = Arc::new(StdoutConsole);
+    let runtime =
+        script_engine::ScriptRuntime::with_options(runtime_options(host, console).cancel(cancel))
+            .await
+            .map_err(|err| format!("创建脚本引擎失败：{err}"))?;
 
     runtime
         .run_named_script(name, source)
@@ -67,8 +67,8 @@ pub async fn run_source(
 /// 这是 CLI 与应用 GUI 共用的「跑一个脚本文件」入口。
 pub async fn run_script_file(
     path: &Path,
-    host: std::sync::Arc<dyn ScriptHost>,
-    cancel: CancellationToken,
+    host: Arc<dyn ScriptHost>,
+    cancel: CancelSignal,
     typed_chars: impl Fn() -> usize,
 ) -> Result<RunReport, String> {
     let source = load_script(path)?;
@@ -89,8 +89,8 @@ mod tests {
 
     #[test]
     fn load_script_rejects_missing_file() {
-        let err = load_script(Path::new("/clipbeam/definitely/not/here.js"))
-            .expect_err("缺文件应当报错");
+        let err =
+            load_script(Path::new("/clipbeam/definitely/not/here.js")).expect_err("缺文件应当报错");
         assert!(err.contains("读取脚本文件"), "错误信息应说明来源：{err}");
     }
 }

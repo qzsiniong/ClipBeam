@@ -9,7 +9,7 @@
   否则用户每次击键都会把光标顶到行首。
 -->
 <script setup lang="ts">
-import type { Capability } from '@/lib/clipbeam-script/autocomplete'
+import type { Capability, NamespaceNames } from '@/lib/clipbeam-script/autocomplete'
 import type { ScriptTarget } from '@/lib/clipbeam-script/language-service'
 import { EditorView } from '@codemirror/view'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -29,6 +29,8 @@ const props = withDefaults(defineProps<{
   language?: 'js' | 'ts'
   /** 后端返回的能力清单（`$.` 补全用）。 */
   capabilities?: Capability[]
+  /** 后端返回的命名空间名字（成员补全与全局候选都用它，前端不写死）。 */
+  namespaceNames?: NamespaceNames
   /** 脚本名（lint 用它判断 `.ts` / `.js`）。 */
   scriptName?: string
   /** 只读模式（运行中禁用编辑）。 */
@@ -36,6 +38,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   language: 'js',
   capabilities: () => [],
+  namespaceNames: () => ({ namespace: '', alias: '' }),
   scriptName: 'script.js',
   readonly: false,
 })
@@ -73,6 +76,7 @@ onMounted(() => {
       props.modelValue,
       clipbeamExtensions(
         currentScript,
+        () => props.namespaceNames,
         () => props.capabilities,
         {
           onChange: (value) => {
@@ -111,10 +115,10 @@ watch(() => props.scriptName, () => {
   })
 })
 
-// 能力清单晚于编辑器到位时热替换补全
-watch(() => props.capabilities, () => {
+// 能力清单 / 命名空间名字晚于编辑器到位时热替换补全
+watch([() => props.capabilities, () => props.namespaceNames], () => {
   if (view)
-    replaceCompletion(view, currentScript, () => props.capabilities)
+    replaceCompletion(view, currentScript, () => props.namespaceNames, () => props.capabilities)
 }, { deep: true })
 </script>
 

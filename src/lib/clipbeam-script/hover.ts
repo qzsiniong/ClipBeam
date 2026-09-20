@@ -2,16 +2,16 @@
 //
 // # 之前为什么没有
 //
-// 项目里从来没有注册过 hover 扩展，所以悬停 `Clipbeam`、`$.typeStr`、任何变量都不会有反应。
+// 项目里从来没有注册过 hover 扩展，所以悬停 `ClipBeam`、`$.type_str`、任何变量都不会有反应。
 //
 // # 现在怎么做
 //
 // 用 TypeScript 语言服务的 `getQuickInfoAtPosition`（同一个服务也在算诊断、补全、签名）：
 // 悬停到任何标识符/表达式上都会得到「签名 + JSDoc」，其中能力的文档来自两份 `.d.ts`。
-// 例如悬停 `$.typeStr` 会显示：
+// 例如悬停 `$.type_str` 会显示：
 //
 // ```text
-// (property) typeStr: (text: string, delayMs?: number) => void
+// (property) type_str: (text: string, delayMs?: number) => void
 // 把文本交给宿主输出（GUI 下逐键打进当前焦点窗口）；被中止时抛异常
 // ```
 //
@@ -34,8 +34,8 @@ const SIGNATURE_LIMIT = 400
 /**
  * 说明文字最多显示这么多字符。
  *
- * TypeScript 会把同一符号的**所有** JSDoc 合并后交给我们 —— 例如悬停全局的 `Clipbeam`
- * 时会同时带上 `interface Clipbeam` 与 `declare const Clipbeam` 两段注释，原样显示就是一个
+ * TypeScript 会把同一符号的**所有** JSDoc 合并后交给我们 —— 例如悬停全局的 `ClipBeam`
+ * 时会同时带上 `interface ClipBeam` 与 `declare const ClipBeam` 两段注释，原样显示就是一个
  * 盖住代码的大方块。所以这里既清理 Markdown 噪声，也截断长度。
  */
 const DOC_LIMIT = 260

@@ -18,7 +18,7 @@ path = "../examples/qr_e2e.rs"
 
 [dependencies]
 # 脚本引擎：core 只提供运行时 / TS 转译 / 基础能力 / 扩展机制
-clipbeam-script = { path = "../crates/clipbeam-script" }
+script-engine = { path = "../crates/script-engine" }
 # 使用方能力集：md5 / base32 / zstd / typeStr / confirm + 脚本目录 + CLI 宿主
 clipbeam-scripting = { path = "../crates/clipbeam-scripting" }
 tauri = { version = "2", features = [

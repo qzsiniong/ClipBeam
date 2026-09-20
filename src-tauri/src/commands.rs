@@ -155,9 +155,9 @@ pub async fn scripts_info() -> Result<serde_json::Value, String> {
     }))
 }
 
-/// 当前可用的脚本能力清单（CodeMirror 补全的数据源）。
+/// 当前可用的脚本能力清单 + 命名空间名字（CodeMirror 补全的数据源）。
 #[tauri::command]
-pub async fn list_capabilities() -> Result<Vec<clipbeam_scripting::Capability>, String> {
+pub async fn list_capabilities() -> Result<clipbeam_scripting::CapabilityList, String> {
     Ok(crate::scripting::capability_list())
 }
 

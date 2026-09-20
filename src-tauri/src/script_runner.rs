@@ -4,15 +4,15 @@
 //! 这里只做 Tauri 侧的三件事：
 //!
 //! 1. 把 `Result<_, String>` 风格的错误整理成前端能直接展示的文案；
-//! 2. 为 GUI 注入 [`crate::scripting::TauriScriptHost`]；
+//! 2. 为 GUI 注入 [`crate::scripting::TauriScriptHost`]（它同时是 `ScriptHost` 与 `ConsoleHook`）；
 //! 3. 把 `HostError` 分类成「已中止 / 已超时 / 环境不支持 / 失败」。
 
 use std::path::Path;
 use std::sync::Arc;
 
-use clipbeam_script::{CancellationToken, ScriptHost, ScriptRuntime};
+use script_engine::{CancelSignal, ConsoleHook, ScriptRuntime};
 use clipbeam_scripting::scripts::{self, ScriptMeta};
-use clipbeam_scripting::{runtime_options, ts};
+use clipbeam_scripting::{runtime_options, ts, ScriptHost};
 
 use crate::cancel::CancellationToken as WorkerCancel;
 
@@ -61,18 +61,18 @@ pub fn transpile_if_needed(name: &str, source: &str) -> Result<String, String> {
         .map_err(|err| err.to_string())
 }
 
-/// 在引擎里执行一段脚本源码（宿主与取消令牌由调用方注入）。
+/// 在引擎里执行一段脚本源码（宿主、console 落点与取消信号由调用方注入）。
 pub async fn run_source(
     name: &str,
     source: &str,
     host: Arc<dyn ScriptHost>,
-    cancel: CancellationToken,
+    console: Arc<dyn ConsoleHook>,
+    cancel: CancelSignal,
 ) -> Result<(), String> {
     let runtime = ScriptRuntime::with_options(
-        runtime_options()
+        runtime_options(host, console)
             .script_name(name)
-            .host(host)
-            .cancel_token(cancel),
+            .cancel(cancel),
     )
     .await
     .map_err(|err| format!("创建脚本引擎失败：{err:#}"))?;
@@ -93,12 +93,12 @@ pub fn describe_error(err: &str) -> String {
     format!("脚本执行失败：{err}")
 }
 
-/// 任务级的中止检查：把 Worker 的取消令牌桥接成引擎令牌。
+/// 任务级的中止检查：把 Worker 的取消令牌桥接成引擎信号。
 ///
 /// `WorkerState` 的令牌是仓库里既有的实现（`src/cancel.rs`），脚本引擎有自己的
-/// `CancellationToken`。这里让引擎令牌**监听** Worker 的标志位，于是 Esc 中止
-/// 既能让 typer 停手，也能让 `$.sleep` 与能力检查立刻返回。
-pub fn engine_cancel(token: &WorkerCancel) -> CancellationToken {
+/// [`CancelSignal`]。这里让引擎信号**监听** Worker 的标志位，于是 Esc 中止
+/// 既能让 typer 停手，也能让 `sleep` 与能力检查立刻返回。
+pub fn engine_cancel(token: &WorkerCancel) -> CancelSignal {
     let flag = token.flag();
-    CancellationToken::watching(move || flag.load(std::sync::atomic::Ordering::SeqCst))
+    CancelSignal::watching(move || flag.load(std::sync::atomic::Ordering::SeqCst))
 }

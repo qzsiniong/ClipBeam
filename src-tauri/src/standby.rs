@@ -14,7 +14,7 @@
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use clipbeam_script::HostError;
+use clipbeam_scripting::HostError;
 use tauri::AppHandle;
 
 use crate::cancel::CancellationToken as WorkerCancel;

@@ -3,13 +3,13 @@
 // # 为什么不再手写补全
 //
 // 之前用 `autocompletion({ override: [clipbeamCompletion(...)] })`：`override` 会**完全替换**
-// 语言自带的补全源，于是只剩「`$`/`Clipbeam` 的成员名 + 5 个全局对象」，变量没有任何
+// 语言自带的补全源，于是只剩「`$`/`ClipBeam` 的成员名 + 标准全局」，变量没有任何
 // 补全与类型。现在改成把问题交给 TypeScript 语言服务（同一个服务也在算诊断/hover/签名）：
 //
 // | 场景 | 语言服务给的结果 |
 // |---|---|
-// | `Clipbeam.` | 全部能力（含签名与 JSDoc，来自 `clipbeam.d.ts`） |
-// | `$.` | 同上（`$` 在声明里是 `Clipbeam` 的别名） |
+// | `ClipBeam.` | 全部能力（含签名与 JSDoc，来自 `clipbeam.d.ts`） |
+// | `$.` | 同上（`$` 在声明里是 `ClipBeam` 的别名） |
 // | `bytes.` | `ArrayBuffer` 的成员（`byteLength` / `slice` …） |
 // | 变量名/关键字/局部符号 | 按当前作用域给出 |
 //
@@ -17,7 +17,7 @@
 // 见 [`./autocomplete.ts`](./autocomplete.ts)。
 
 import type { Completion, CompletionContext, CompletionInfo, CompletionResult, CompletionSource } from '@codemirror/autocomplete'
-import type { Capability } from './autocomplete'
+import type { Capability, NamespaceNames } from './autocomplete'
 import type { ScriptTarget, TsCompletionEntry } from './language-service'
 import { clipbeamCompletion } from './autocomplete'
 import { completions, isServiceReady } from './language-service'
@@ -124,10 +124,12 @@ function toCompletion(entry: TsCompletionEntry): Completion {
  * 建一个补全源。
  *
  * @param getScript 读取当前脚本（名字 + 内容）。
+ * @param getNamespace 命名空间的全局名字（后端下发）。
  * @param getCapabilities 能力清单（仅用于语言服务未就绪时的兜底）。
  */
 export function clipbeamCompletionSource(
   getScript: ScriptGetter,
+  getNamespace: () => NamespaceNames,
   getCapabilities: () => Capability[],
 ): CompletionSource {
   /**
@@ -138,7 +140,7 @@ export function clipbeamCompletionSource(
    * `CompletionResult | null`）。
    */
   const fallback = async (context: CompletionContext): Promise<CompletionResult | null> =>
-    await clipbeamCompletion(getCapabilities())(context)
+    await clipbeamCompletion(getNamespace(), getCapabilities())(context)
 
   return async (context: CompletionContext): Promise<CompletionResult | null> => {
     // 语言服务还没就绪：先用能力清单顶着，别让用户什么都看不到

@@ -21,8 +21,8 @@
 // |---|---|
 // | `/lib.es5.d.ts` | 核心对象（**`ArrayBuffer` / `Uint8Array` / `Promise` / `Map` 都在这里**） |
 // | `/lib.es2022.d.ts` | ES2022 新增（`Object.hasOwn`、`Array.prototype.at` 等） |
-// | `/clipbeam-script.d.ts` | `crates/clipbeam-script/src/spec/clipbeam.d.ts`（core 能力） |
-// | `/clipbeam-scripting.d.ts` | `crates/clipbeam-scripting/src/spec/clipbeam.d.ts`（扩展能力） |
+// | `/script-engine.d.ts` | `crates/script-engine/src/spec/engine.d.ts`（引擎补齐的标准全局） |
+// | `/clipbeam-scripting.d.ts` | `crates/clipbeam-scripting/src/spec/clipbeam.d.ts`（能力命名空间与全部能力） |
 // | `/<脚本名>` | 用户脚本 |
 //
 // 两份 `.d.ts` 直接读 crate 源码，因此与 Rust 侧**同一个真源**：类型提示、
@@ -46,7 +46,7 @@ export interface ScriptDiagnostic {
 
 /** 悬停信息（已拍平成纯文本，由 hover.ts 组装 DOM）。 */
 export interface HoverInfo {
-  /** 签名行，例如 `(property) typeStr: (text: string, delayMs?: number) => void`。 */
+  /** 签名行，例如 `(property) type_str: (text: string, delayMs?: number) => void`。 */
   signature: string
   /** JSDoc 正文（可能为空）。 */
   documentation: string
@@ -69,7 +69,7 @@ export interface TsCompletionEntry {
 
 /** 一个候选签名。 */
 export interface SignatureInfo {
-  /** 完整签名文本，例如 `zstd(data: ArrayBuffer, chunkSize?: number): ArrayBuffer[]`。 */
+  /** 完整签名文本，例如 `zstd(data: BinaryInput, level?: number): ArrayBuffer`。 */
   label: string
   /** 各参数文本（用于高亮当前参数）。 */
   parameters: string[]
@@ -92,7 +92,7 @@ export interface SignatureInfo {
  */
 const LIB_NAMES = ['lib.es5.d.ts', 'lib.es2022.d.ts'] as const
 
-const SCRIPT_LIB_FILE = '/clipbeam-script.d.ts'
+const SCRIPT_LIB_FILE = '/script-engine.d.ts'
 const EXTENSION_LIB_FILE = '/clipbeam-scripting.d.ts'
 
 /** 虚拟路径 → TypeScript 包内的 lib 文件名。 */
@@ -156,9 +156,9 @@ export function ensureService(): Promise<void> {
   }
   if (!loading) {
     loading = (async () => {
-      const [tsImport, core, extension, es5, es2022] = await Promise.all([
+      const [tsImport, engine, extension, es5, es2022] = await Promise.all([
         import('typescript'),
-        import('../../../crates/clipbeam-script/src/spec/clipbeam.d.ts?raw'),
+        import('../../../crates/script-engine/src/spec/engine.d.ts?raw'),
         import('../../../crates/clipbeam-scripting/src/spec/clipbeam.d.ts?raw'),
         import('typescript/lib/lib.es5.d.ts?raw'),
         import('typescript/lib/lib.es2022.d.ts?raw'),
@@ -170,7 +170,7 @@ export function ensureService(): Promise<void> {
 
       files[libPath('lib.es5.d.ts')] = es5.default
       files[libPath('lib.es2022.d.ts')] = es2022.default
-      files[SCRIPT_LIB_FILE] = core.default
+      files[SCRIPT_LIB_FILE] = engine.default
       files[EXTENSION_LIB_FILE] = extension.default
       for (const path of [libPath('lib.es5.d.ts'), libPath('lib.es2022.d.ts'), SCRIPT_LIB_FILE, EXTENSION_LIB_FILE]) {
         versions[path] = '1'

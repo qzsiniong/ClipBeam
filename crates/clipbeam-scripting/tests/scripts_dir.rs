@@ -18,7 +18,14 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 /// 合法/非法脚本名的判定。
 #[test]
 fn name_validation() {
-    for ok in ["a.js", "01-quick-start.js", "demo.TS", "x.mts", "y.cjs", "z.cts"] {
+    for ok in [
+        "a.js",
+        "01-quick-start.js",
+        "demo.TS",
+        "x.mts",
+        "y.cjs",
+        "z.cts",
+    ] {
         assert!(is_valid_script_name(ok), "{ok} 应当合法");
     }
     for bad in [
@@ -36,7 +43,10 @@ fn name_validation() {
 
     assert!(check_script_name("ok.js").is_ok());
     let err = check_script_name("../evil.js").expect_err("非法名应当报错");
-    assert!(err.contains("非法脚本文件名"), "错误信息应当说明原因：{err}");
+    assert!(
+        err.contains("非法脚本文件名"),
+        "错误信息应当说明原因：{err}"
+    );
 }
 
 /// 扩展名与语言标签映射。
@@ -80,8 +90,21 @@ fn seed_scripts_are_named_and_non_empty() {
         assert!(is_valid_script_name(name), "示例名 {name} 非法");
         assert!(!source.trim().is_empty(), "示例 {name} 内容为空");
         assert!(
-            source.contains("Clipbeam"),
-            "示例 {name} 应当使用 Clipbeam 全局对象"
+            source.contains("$."),
+            "示例 {name} 应当通过 $.能力 使用能力命名空间"
+        );
+        // `$` 是引擎挂上的不可写绑定，脚本再声明一次会报「redeclaration of '$'」
+        // （只认真正的声明语句，注释里提到这段历史不算）
+        let redeclares = source.lines().map(str::trim_start).any(|line| {
+            line.starts_with("const $ =")
+                || line.starts_with("let $ =")
+                || line.starts_with("var $ =")
+        });
+        assert!(!redeclares, "示例 {name} 不该自己声明 $（全局已经提供）");
+        // 拼写守卫：品牌是 ClipBeam，`Clipbeam`（小写 b）是个曾经存在过的坑
+        assert!(
+            !source.contains("Clipbeam"),
+            "示例 {name} 里的能力命名空间应当写 `ClipBeam`（品牌拼写）"
         );
     }
 }

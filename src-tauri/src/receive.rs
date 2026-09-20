@@ -277,8 +277,8 @@ mod tests {
         let f0 = parse_qr_frame(&build_qr_frame(1, 0, crc, &payload)).unwrap();
         let mut b = Batch::new(&f0);
         // 篡改首字符但保持批次键（crc/total）不变
-        let flipped = if payload.starts_with('M') {
-            format!("N{}", &payload[1..])
+        let flipped = if let Some(rest) = payload.strip_prefix('M') {
+            format!("N{rest}")
         } else {
             format!("M{}", &payload[1..])
         };

@@ -13,7 +13,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// 允许的脚本扩展名（与 `clipbeam_script::ts` 的转译范围保持一致）。
+/// 允许的脚本扩展名（与 `script_engine::ts` 的转译范围保持一致）。
 pub const SCRIPT_EXTENSIONS: [&str; 6] = ["js", "mjs", "cjs", "ts", "mts", "cts"];
 
 /// 脚本名长度上限（字符）。
@@ -21,7 +21,10 @@ const MAX_NAME_CHARS: usize = 128;
 
 /// 内置示例：(文件名, 内容)。
 pub const SEED_SCRIPTS: [(&str, &str); 2] = [
-    ("01-quick-start.js", include_str!("../seed/01-quick-start.js")),
+    (
+        "01-quick-start.js",
+        include_str!("../seed/01-quick-start.js"),
+    ),
     ("02-ts-demo.ts", include_str!("../seed/02-ts-demo.ts")),
 ];
 
@@ -89,7 +92,7 @@ pub fn check_script_name(name: &str) -> Result<(), String> {
 pub struct ScriptMeta {
     /// 文件名（同时是唯一标识）。
     pub name: String,
-    /// 绝对路径，便于脚本里用 `$.file` 或用户定位。
+    /// 绝对路径，便于脚本里用 `$.read` 或用户定位。
     pub path: String,
     /// `"js"` 或 `"ts"`。
     pub language: String,

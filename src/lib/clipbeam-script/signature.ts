@@ -3,7 +3,7 @@
 // 输入 `$.zstd(` 或参数之间按 `,` 时，在编辑区上方显示当前函数的签名，并高亮当前参数：
 //
 // ```text
-// zstd(data: ArrayBuffer, chunkSize?: number): ArrayBuffer[]       参数 1/2
+// zstd(data: BinaryInput, level?: number): ArrayBuffer       参数 1/2
 //      ~~~~~~~~~~~~~
 // ```
 //

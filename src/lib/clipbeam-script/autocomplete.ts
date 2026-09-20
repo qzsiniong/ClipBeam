@@ -1,10 +1,12 @@
-// 脚本编辑器：`$` / `Clipbeam` 的补全数据源。
+// 脚本编辑器：能力命名空间的补全数据源。
 //
-// 数据来源是后端能力清单（`list_capabilities` 命令）—— 它与运行期注册的能力同源，
-// 因此引擎或少一个能力时，补全不会还在提示一个不存在的方法。
+// 数据来源是后端的 `list_capabilities` 命令 —— 它与运行期注册的能力同源，
+// 因此引擎少一个能力时，补全不会还在提示一个不存在的方法。
 //
-// 这里再把「全局对象本身」的补全补上（`$`、`Clipbeam`、`TextDecoder`…），
-// 这些不来自能力清单，而是引擎固定提供的全局。
+// 命名空间的**名字**（`ClipBeam` / `$` / 以后换成别的）同样由后端下发（`CapabilityList`），
+// 前端不写死：改名只需要改 `clipbeam_scripting::NAMESPACE`。
+//
+// 这里再把引擎固定提供的标准全局补上（`TextDecoder`、`sleep`…），它们不来自能力清单。
 
 import type { Completion, CompletionContext, CompletionResult, CompletionSource } from '@codemirror/autocomplete'
 
@@ -16,14 +18,39 @@ export interface Capability {
   signature: string
   /** 一句话说明。 */
   doc: string
-  /** `core`（引擎自带）或 `clipbeam`（ClipBeam 扩展）。 */
+  /** 来源标记；目前只有 `clipbeam`（引擎不提供能力）。 */
   source: string
 }
 
-/** 引擎固定提供的全局对象（不来自能力清单）。 */
-const GLOBALS: Completion[] = [
-  { label: 'Clipbeam', type: 'class', detail: '能力命名空间', info: '脚本可用的全部能力都挂在这个对象上' },
-  { label: '$', type: 'variable', detail: 'Clipbeam 的别名', info: '指向同一个对象，写起来更短' },
+/**
+ * 能力命名空间的全局名字（后端下发）。
+ *
+ * `namespace` 一定非空；`alias` 为空串表示没有别名。
+ */
+export interface NamespaceNames {
+  namespace: string
+  alias: string
+}
+
+/** `list_capabilities` 命令的返回体。 */
+export interface CapabilityList extends NamespaceNames {
+  capabilities: Capability[]
+}
+
+/** 命名空间对象的补全项（名字来自后端）。 */
+function namespaceCompletions(names: NamespaceNames): Completion[] {
+  const entries: Completion[] = [
+    { label: names.namespace, type: 'class', detail: '能力命名空间', info: '脚本可用的全部能力都挂在这个对象上' },
+  ]
+  if (names.alias) {
+    entries.push({ label: names.alias, type: 'variable', detail: `${names.namespace} 的别名`, info: '指向同一个对象，写起来更短' })
+  }
+  return entries
+}
+
+/** 引擎固定提供的标准全局（不来自能力清单）。 */
+const ENGINE_GLOBALS: Completion[] = [
+  { label: 'sleep', type: 'function', detail: '异步等待', info: 'await sleep(ms)：等待期间被中止会立即返回' },
   {
     label: 'TextDecoder',
     type: 'class',
@@ -34,12 +61,21 @@ const GLOBALS: Completion[] = [
   { label: 'console', type: 'variable', detail: '日志输出', info: 'log / info / debug / warn / error' },
 ]
 
+/** 把名字转义成能安全放进正则的字面量（`$` 这类字符必须转义）。 */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /**
  * 建一个补全源。
  *
- * `capabilities` 为空时仍然提供全局对象补全（例如后端还没返回清单）。
+ * @param names 命名空间的全局名字（后端下发；空名字的列表也能用，只是没有成员补全）。
+ * @param capabilities 能力清单（后端下发）。
  */
-export function clipbeamCompletion(capabilities: Capability[]): CompletionSource {
+export function clipbeamCompletion(
+  names: NamespaceNames,
+  capabilities: Capability[],
+): CompletionSource {
   const methodCompletions: Completion[] = capabilities.map(capability => ({
     label: capability.name,
     type: 'method',
@@ -49,18 +85,29 @@ export function clipbeamCompletion(capabilities: Capability[]): CompletionSource
     boost: capability.source === 'clipbeam' ? 1 : 0,
   }))
 
+  const globals = [...namespaceCompletions(names), ...ENGINE_GLOBALS]
+
+  // 成员补全：`$.` / `ClipBeam.`（名字来自后端，不写死）
+  const memberNames = [names.namespace, names.alias]
+    .filter(Boolean)
+    .map(escapeRegExp)
+  const memberPattern = memberNames.length > 0
+    ? new RegExp(`(?:${memberNames.join('|')})\\.[\\w$]*`)
+    : null
+
   return (context: CompletionContext): CompletionResult | null => {
-    // 成员补全：`$.` / `Clipbeam.`
-    const member = context.matchBefore(/\$\.[\w$]*|Clipbeam\.[\w$]*/)
-    if (member) {
-      return {
-        from: member.from + member.text.indexOf('.') + 1,
-        options: methodCompletions,
-        validFor: /^[\w$]*$/,
+    if (memberPattern) {
+      const member = context.matchBefore(memberPattern)
+      if (member) {
+        return {
+          from: member.from + member.text.indexOf('.') + 1,
+          options: methodCompletions,
+          validFor: /^[\w$]*$/,
+        }
       }
     }
 
-    // 全局对象补全：`$` / `Clipbeam` / 标准 API
+    // 全局对象补全：命名空间（含别名）与引擎标准全局
     const word = context.matchBefore(/\w+/)
     if (!word) {
       return null
@@ -68,6 +115,6 @@ export function clipbeamCompletion(capabilities: Capability[]): CompletionSource
     if (word.from === word.to && !context.explicit) {
       return null
     }
-    return { from: word.from, options: GLOBALS, validFor: /^\w*$/ }
+    return { from: word.from, options: globals, validFor: /^\w*$/ }
   }
 }

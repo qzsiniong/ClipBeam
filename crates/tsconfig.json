@@ -1,0 +1,27 @@
+{
+  // 给 crates/ 下的**脚本类型声明**（*/src/spec/*.d.ts）一个「脚本环境」项目。
+  //
+  // 为什么需要：这些声明是给脚本作者看的全局声明，故意**不带 DOM lib**（脚本运行时
+  // 没有 fetch / document）。但它们若不落在任何 tsconfig 的 include 里，编辑器会用
+  // inferred project（默认带 DOM）去检查，于是 TextDecoder / TextEncoder / console /
+  // performance 与 lib.dom.d.ts 重名，报 TS2300 / TS2451。
+  //
+  // 让这个项目「拥有」这些文件即可：语言服务会挑离文件最近的、且 include 了它的 tsconfig。
+  // 注意脚本的真实类型检查仍走根目录的 tsconfig.scripts.json（它 include 同样两个文件）。
+  "compilerOptions": {
+    "target": "ES2022",
+    // 与脚本运行环境一致：只有 ECMAScript 标准库，没有 DOM
+    "lib": ["ESNext"],
+    "moduleDetection": "force",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  // 两个来源：
+  //   - */src/spec/*.d.ts：脚本作者看到的全局声明（能力真源）
+  //   - */seed/*.ts：内置示例里的 TS 示例（`.js` 示例与根目录 scripts/ 保持一致，不在这里检查）
+  "include": ["*/src/spec/*.d.ts", "*/seed/*.ts"]
+}

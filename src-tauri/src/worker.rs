@@ -614,12 +614,13 @@ where
     send_progress(0, 0);
 
     let engine_cancel = crate::script_runner::engine_cancel(token);
-    // 引擎需要 tokio 上下文(AsyncRuntime 与 $.sleep 都依赖它):block_on 会把当前线程
+    // 引擎需要 tokio 上下文(AsyncRuntime 与 sleep 都依赖它):block_on 会把当前线程
     // 带进 Tauri 的异步运行时。当前线程是 spawn_blocking 出来的,阻塞它是安全的。
     let result = tauri::async_runtime::block_on(crate::script_runner::run_source(
         &request.name,
         &request.source,
-        host.clone() as Arc<dyn clipbeam_script::ScriptHost>,
+        host.clone() as Arc<dyn clipbeam_scripting::ScriptHost>,
+        host.clone() as Arc<dyn script_engine::ConsoleHook>,
         engine_cancel,
     ));
 

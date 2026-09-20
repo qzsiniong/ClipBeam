@@ -247,14 +247,14 @@ cargo build --release
 适合「把某个文件的多个分片依次敲进远程窗口」这类固定脚本化场景。
 
 ```js
-const $ = Clipbeam
-const bytes = await $.file('data.bin')   // 读真实文件（相对路径按进程工作目录解析）
-const chunks = $.zstd(bytes, 1024)       // Zstandard 压缩并按 1 KiB 切片
-$.typeStr(`共 ${chunks.length} 片\n`, 10) // 逐键打进当前焦点窗口
-for (let i = 0; i < chunks.length; i++) {
-  if (await $.confirm(`发送第 ${i} 片？`)) {
-    await $.sleep(1000)
-    $.typeStr(`${i}\n${$.base32(chunks[i])}\n`, 10)
+// `$`（正式名 `ClipBeam`）是引擎挂上的能力命名空间；`sleep` 是引擎提供的全局（要 await）
+const bytes = await $.read('~/data.bin')   // 读真实文件（只接受**绝对路径**）
+const parts = $.chunks($.zstd(bytes), 1024) // 先压缩，再按 1 KiB 分片（两件事分开）
+$.type_str(`共 ${parts.length} 片\n`, 10)  // 逐键打进当前焦点窗口
+for (let i = 0; i < parts.length; i++) {
+  if (await $.confirm(`发送第 ${i + 1} 片？`)) {
+    await sleep(1000)                       // 全局 sleep，必须 await
+    $.type_str(`${i}\n${$.base32_nopad(parts[i])}\n`, 10)
   }
 }
 ```
@@ -263,26 +263,60 @@ for (let i = 0; i < chunks.length; i++) {
 
 | 层 | 位置 | 职责 |
 |---|---|---|
-| 引擎（core） | `crates/clipbeam-script/` | 跑 JS/TS（QuickJS + oxc 进程内转译）、基础能力（`$.file` / `$.sleep` / `console` / `TextDecoder` / `TextEncoder`）、**能力扩展机制** |
-| 使用方能力集 | `crates/clipbeam-scripting/` | 用扩展机制注入 ClipBeam 需要的能力：`md5` / `base32` / `zstd` / `typeStr` / `confirm`；脚本目录与内置示例；终端宿主 |
-| 应用 | `src-tauri/`（`scripting.rs` / `standby.rs` / `console_panel.rs` / `script_runner.rs`） | 接 Tauri 命令、Worker 任务、`Typer` 键盘输出、**系统原生确认框**、**惰性待命窗口**、**Console 面板缓冲** |
+| 引擎（core） | `crates/script-engine/` | 跑 JS/TS（QuickJS + oxc 进程内转译）、`sleep` / `console` / `TextDecoder` / `TextEncoder` / 定时器 / `atob`·`btoa` / `performance` / `structuredClone`、**能力扩展机制**、**命名空间配置**（名字由使用方给） |
+| 使用方能力集 | `crates/clipbeam-scripting/` | **决定命名空间叫什么**（`NAMESPACE` / `NAMESPACE_ALIAS`）；用扩展机制注入 ClipBeam 需要的能力：编解码（hex / base32 / base64）、摘要（md5 / crc32）、压缩（zstd / gzip / brotli / xz）、文件系统（`$.read` / `$.write` …）、宿主交互（`$.type_str` / `$.confirm`）；`ScriptHost` 定义；脚本目录与内置示例；终端宿主 |
+| 应用 | `src-tauri/`（`scripting.rs` / `standby.rs` / `console_panel.rs` / `script_runner.rs`） | 接 Tauri 命令、Worker 任务、`Typer` 键盘输出、**系统原生确认框与文件授权框**、**惰性待命窗口**、**Console 面板缓冲** |
 
-引擎本身**不认识**剪贴板 / 键盘 / Zstandard：需要什么能力由使用方通过
-`ScriptExtension` 注入（新增能力只要实现 `register` + `spec` 两个方法）。
+引擎本身**不认识**剪贴板 / 键盘 / Zstandard，**也不给能力命名空间起名字**：它建一个匿名对象，
+名字（`ClipBeam` / `$`）由使用方在 `RuntimeOptions::namespace` 里配置 —— 引擎里没有一处业务名字。
+能力再由使用方通过 `ScriptExtension` 注入（新增能力只要实现 `register` + `spec` 两个方法）。
+
+命名空间挂上是**不可写、不可配置**的，所有扩展注册完后对象会被 `Object.freeze`：
+脚本改不了能力（`$.md5 = null` 会直接报错）。`$` 由引擎提供，所以脚本里**不要**再写
+`const $ = ClipBeam`（会报 `redeclaration of '$'`），直接用 `$` 即可。
 
 ### 能力一览
 
+凡是接收二进制的能力都接受三种入参：`string`（按 UTF-8 编码）、`ArrayBuffer`、任何
+`ArrayBufferView`（`Uint8Array` / `DataView` …，按 `byteOffset` + `byteLength` 取）。
+
 | 能力 | 说明 |
 |---|---|
-| `$.file(path)` | 读真实文件，返回 `Promise<ArrayBuffer>`；相对路径按**进程工作目录**解析 |
-| `$.sleep(ms)` | 异步等待；被中止时立即返回 |
+| `$.bytes(data)` | 统一成 `ArrayBuffer`（字符串按 UTF-8） |
+| `$.str(data, encoding?)` | 字节 → 文本（默认 `utf-8`，支持全部 WHATWG 标签） |
+| `$.chunks(data, chunkSize?)` | 按 `chunkSize` 分片（默认 1024），返回 `ArrayBuffer[]` |
+| `$.hex` / `$.hex_upper` / `$.hex_decode` | 十六进制编解码（解码大小写均可） |
+| `$.base32` / `_nopad` / `_lower` / `_lower_nopad` | RFC4648 Base32：大写+填充 / 大写无填充 / 小写+填充 / 小写无填充 |
+| `$.base32_decode` / `_nopad_decode` / `_lower_decode` / `_lower_nopad_decode` | 与上面一一对应；**严格**校验大小写与填充 |
+| `$.base64` / `_nopad` / `_url` / `_url_nopad` + 对应 `*_decode` | 标准盘表与 URL-safe 盘表，各自带/不带填充 |
 | `$.md5(data)` | 32 位小写十六进制 MD5 |
-| `$.base32(data)` | RFC4648 Base32（无填充、小写） |
-| `$.zstd(data, chunkSize?)` | Zstandard 压缩（级别 3）并按 `chunkSize` 切片，默认 1024 字节 |
-| `$.typeStr(text, delayMs?)` | 把文本交给宿主输出：GUI 下逐个字符打进**当前焦点窗口**，命令行下打印到终端 |
+| `$.crc32(data, format?)` | CRC-32（大端）：`hex`（默认，8 位大写）/ `hex_lower` / `base32`（7 位）/ `base32_lower` / `base64`（6 位） |
+| `$.zstd(data, level?)` | Zstandard 压缩（默认级别 3）；**只压缩不分片** |
+| `$.gzip` / `$.gunzip` | gzip 压缩（默认 6）与解压 |
+| `$.brotli` / `$.unbrotli` | Brotli 压缩（默认质量 5）与解压 |
+| `$.lzma` / `$.unlzma` | xz（LZMA2）压缩与解压，产物兼容 `xz` / `7z` / `tar -J` |
+| `$.read` / `$.read_text` | 读文件（字节 / 带编码的文本），只读不询问 |
+| `$.exists` / `$.stat` / `$.list` | 存在性、元信息（大小 / 类型 / 修改时间）、目录条目 |
+| `$.write` / `$.write_text` / `$.append` / `$.append_text` | 写 / 覆盖、追加（**会先询问**；父目录需已存在） |
+| `$.mkdir` / `$.remove` / `$.rename` / `$.copy` | 建目录（递归）/ 删除（目录递归）/ 改名移动 / 复制（目录递归），**都会先询问** |
+| `$.type_str(text, delayMs?)` | 把文本交给宿主输出：GUI 下逐个字符打进**当前焦点窗口**，命令行下打印到终端 |
 | `$.confirm(message)` | 向用户提问：GUI 下弹**系统原生**确认框（是 / 否 / 取消），命令行下读 stdin；回答「是」为 `true`、「否」为 `false`、取消/中止时抛异常，**不设超时**（一直等用户回答） |
 | `console.log/info/debug/warn/error` | 写到脚本窗口底部的 **Console 面板**（按等级着色）；命令行运行时打到终端 |
+| `sleep(ms)`（**标准全局**） | 异步等待；等待期间被中止会立即返回。返回 Promise，**必须 `await`** |
+| `setTimeout` / `setInterval` / `clearTimeout` / `clearInterval` | 定时器；**只属于本次运行**，脚本结束时统一清理 |
+| `performance.now()` / `structuredClone(v)` | 单调时钟 / JSON 语义深拷贝 |
+| `atob` / `btoa` | WHATWG 语义的 base64（只处理 Latin-1 字符串） |
 | `TextDecoder` / `TextEncoder` | 支持全部 WHATWG 编码标签（`utf-8` / `gbk` / `gb18030` / `big5` / `shift_jis` …） |
+
+### 文件系统的两条规则
+
+1. **只接受绝对路径**。`~`（主目录）、`C:/x`、`C:\x`、git-bash 的 `/d/x`、Cygwin 的
+   `/cygdrive/d/x` 都算绝对路径；相对路径直接报错 —— 脚本的工作目录取决于宿主怎么启动，
+   放行相对路径等于埋雷。
+2. **修改要问一次**。只读操作（`read` / `read_text` / `exists` / `stat` / `list`）不问；
+   写、追加、建目录、删除、改名、复制每次都会弹一个三按钮系统框：
+   `允许一次` / `本次运行内该目录都允许` / `拒绝`。「本次运行内都允许」记在**本次运行**里，
+   运行结束即失效（下次运行重新问）。命令行下非交互（管道 / 重定向）时一律按**拒绝**处理。
 
 脚本里可以直接使用**顶层 `await`**，不需要包 `async` IIFE。
 
@@ -300,18 +334,18 @@ for (let i = 0; i < chunks.length; i++) {
 > 实现见 `src-tauri/src/lib.rs` 的 `sync_dock_icon`（用 Tauri 的 `set_dock_visibility`，
 > 它内部对 macOS 的进程类型切换做了防抖）。
 
-**待命窗口只在首次 `$.typeStr` 之前弹**：脚本不一定注入键盘事件（例如只读文件、算摘要的脚本），
+**待命窗口只在首次 `$.type_str` 之前弹**：脚本不一定注入键盘事件（例如只读文件、算摘要的脚本），
 所以待命窗口是惰性的 ——
 
-* 脚本执行到**第一次** `$.typeStr` 时，才弹出待命窗口并等用户点击目标窗口；
+* 脚本执行到**第一次** `$.type_str` 时，才弹出待命窗口并等用户点击目标窗口；
 * 纯计算脚本（从不输出）**不会有任何待命提示**，直接跑完；
-* 同一次运行里只提示一次，后续 `$.typeStr` 不再重复打扰；
+* 同一次运行里只提示一次，后续 `$.type_str` 不再重复打扰；
 * 脚本在那之前可能已经读文件、算摘要、打印 `console` 日志 —— 这些都照常执行。
 
 待命窗口有 10 秒倒计时，超时即取消任务。进度窗口会显示「已敲入 N/M 字符 + 当前输出片段」，
 按 **Esc**（或点「中止」）随时停下。
 
-**命令行**：`clipbeam script <文件>`，`$.typeStr` 写终端、`$.confirm` 读 stdin
+**命令行**：`clipbeam script <文件>`，`$.type_str` 写终端、`$.confirm` 与文件授权读 stdin
 （不需要待命窗口：终端的焦点就是当前窗口）；加 `--raw` 时不走逐字打字节奏，
 适合把输出重定向到文件或管道。
 
@@ -325,7 +359,7 @@ Linux   ~/.config/ClipBeam/scripts/
 
 首次启动会写入两个内置示例（`01-quick-start.js`、`02-ts-demo.ts`），**已存在的文件不会被覆盖** ——
 你可以放心修改示例，下次启动不会还原。GUI 里可以新建 / 编辑 / 保存 / 删除。
-`$.file` 不受脚本目录限制，可以读任意路径（相对路径按进程工作目录解析）。
+文件能力不受脚本目录限制，可以访问任意**绝对路径**（第一次修改某个目录里的东西时会向你确认）。
 
 ### Console 面板
 
@@ -360,18 +394,45 @@ TypeScript 语言服务** —— 补全、悬停、参数信息、诊断问的�
 
 | 能力 | 说明 |
 |---|---|
-| 补全 | 按上下文给候选：`Clipbeam.` / `$.` 列出全部能力（带签名与 JSDoc）、变量后列出它类型的成员、标识符位置列出作用域内的变量；候选项的详情面板显示签名 + 说明 |
-| 悬停 | 悬停任何标识符/表达式显示类型签名 + JSDoc，例如 `(method) Clipbeam.md5(data: ArrayBuffer): string`；说明会被清理 Markdown 并截断（最长 260 字），tooltip 限宽 460px、限高 240px，避免盖住代码 |
+| 补全 | 按上下文给候选：`ClipBeam.` / `$.` 列出全部能力（带签名与 JSDoc）、变量后列出它类型的成员、标识符位置列出作用域内的变量；候选项的详情面板显示签名 + 说明 |
+| 悬停 | 悬停任何标识符/表达式显示类型签名 + JSDoc，例如 `(method) ClipBeam.md5(data: BinaryInput): string`；说明会被清理 Markdown 并截断（最长 260 字），tooltip 限宽 460px、限高 240px，避免盖住代码 |
 | 参数信息 | 在调用括号里显示签名并高亮当前参数（编辑器顶部一条，例如 `zstd(data: ArrayBuffer, chunkSize?: number)` + `参数 1/2`） |
 | 诊断 | 类型不匹配、拼错方法名、用了运行时不存在的 API 都会标红/标黄（`TS2345:` 这类错误码也一并显示） |
-| 编辑体验 | 括号匹配/自动闭合、自动缩进、搜索、`Cmd/Ctrl+Enter` 运行、`Cmd/Ctrl+S` 保存 |
+| 编辑体验 | 括号匹配/自动闭合、自动缩进、搜索、`Cmd/Ctrl+Enter` 运行、`Cmd/Ctrl+S` 保存（完整快捷键见脚本窗口右上角的 ⌨ 面板） |
 
-编辑器里的类型来自两个声明文件（`crates/*/src/spec/clipbeam.d.ts`），它们同时被
+#### 快捷键
+
+脚本窗口右上角有一个 ⌨ 按钮，点开就是完整清单（内容由 `src/lib/clipbeam-script/shortcuts.ts`
+提供，与编辑器真实绑定共用同一份键位串，不会漂移）；运行/保存按钮的 tooltip 也会带上快捷键。
+macOS 显示 ⌘/⇧/⌥/⌃，Windows/Linux 显示 Ctrl/Shift/Alt：
+
+| 分组 | 动作 | macOS | Windows / Linux |
+|---|---|---|---|
+| 运行与保存 | 运行脚本 | `⌘⏎` | `Ctrl+Enter` |
+| 运行与保存 | 保存脚本 | `⌘S` | `Ctrl+S` |
+| 编辑 | 撤销 / 重做 | `⌘Z` / `⌘⇧Z` | `Ctrl+Z` / `Ctrl+Y` |
+| 编辑 | 注释 / 取消注释 | `⌘/` | `Ctrl+/` |
+| 编辑 | 增加 / 减少缩进 | `⌘]` / `⌘[` | `Ctrl+]` / `Ctrl+[` |
+| 编辑 | 整行上移 / 下移 | `⌥↑` / `⌥↓` | `Alt+↑` / `Alt+↓` |
+| 编辑 | 删除整行 | `⇧⌘K` | `Shift+Ctrl+K` |
+| 编辑 | 全选 | `⌘A` | `Ctrl+A` |
+| 查找 | 查找 | `⌘F` | `Ctrl+F` |
+| 查找 | 下一个 / 上一个匹配 | `⌘G` / `⌘⇧G` | `Ctrl+G` / `Ctrl+Shift+G` |
+| 查找 | 选中下一个相同词 | `⌘D` | `Ctrl+D` |
+| 查找 | 跳到行 | `⌥⌘G` | `Ctrl+Alt+G` |
+| 补全与提示 | 触发补全 | `` ⌥` ``（Ctrl-Space 在 mac 常被输入法占用） | `Ctrl+Space` |
+| 补全与提示 | 接受候选 / 关闭面板 | `⏎` / `Esc` | `Enter` / `Esc` |
+
+> 面板有意只列「常用」部分：方向键、Home/End、多光标（`⌘⌥↑/↓`）、复制行（`⇧⌥↑/↓`）
+> 等 CodeMirror 默认键位没有一一列出。
+
+编辑器里的类型来自两个声明文件（`crates/script-engine/src/spec/engine.d.ts` 与
+`crates/clipbeam-scripting/src/spec/clipbeam.d.ts`），它们同时被
 `pnpm typecheck:scripts` 使用，因此**编辑器里的断言与命令行检查一致**：
 
 ```bash
-pnpm typecheck:scripts    # 用 tsc 检查 scripts/*.ts（不需要装 Node 也能运行脚本本身）
-pnpm test:editor          # 编辑器语义功能的单测（悬停/补全/参数信息/诊断）
+pnpm typecheck:scripts    # 用 tsc 检查内置示例（crates/clipbeam-scripting/seed/*.ts）与两份声明
+pnpm test:editor          # 编辑器语义功能与快捷键格式化的单测
 ```
 
 > TypeScript 语言服务是**懒加载**的（体积不小）：首次打开脚本页时后台预热，
@@ -402,8 +463,9 @@ pnpm test:editor          # 编辑器语义功能的单测（悬停/补全/参�
 
 ### 安全说明
 
-脚本拥有**与 ClipBeam 同等的本机权限**：`$.file` 可以读任意文件、`$.typeStr` 会把内容
-敲进当前焦点窗口。当前没有沙箱、没有权限提示，请只运行你信任的脚本。
+脚本拥有**与 ClipBeam 同等的本机权限**：`$.read` 可以读任意**绝对路径**、`$.type_str` 会把内容
+敲进当前焦点窗口。读操作没有沙箱也没有提示；写 / 删 / 改名 / 复制 / 建目录每次都会弹系统框
+确认（可以放行「本次运行内该目录」）。请只运行你信任的脚本。
 
 ---
 
@@ -455,8 +517,8 @@ pnpm workspace + cargo workspace 单仓多包布局：
 
 - 仓库根：Tauri 主界面（Vue 3 + Vite + TS + shadcn-vue）；`Cargo.toml` 定义 cargo workspace
 - `src-tauri/`：Rust crate + Tauri 配置（`clipbeam_lib` + `clipbeam` 二进制）
-- `crates/clipbeam-script/`：嵌入式脚本引擎（QuickJS + oxc），只提供基础能力与扩展机制
-- `crates/clipbeam-scripting/`：使用方能力集（md5/base32/zstd/typeStr/confirm）+ 脚本目录 + 终端宿主
+- `crates/script-engine/`：可嵌入的脚本引擎（QuickJS + oxc），只提供标准全局、扩展机制与命名空间配置
+- `crates/clipbeam-scripting/`：使用方能力集（编解码 / 摘要 / 压缩 / 文件系统 / 宿主交互）+ `ScriptHost` + 脚本目录 + 终端宿主
 - `scripts/`：示例脚本（供命令行运行；内置示例的真源在 `crates/clipbeam-scripting/seed/`）
 - `packages/shared/`：两个 client 共享的协议逻辑（CB1 分帧、base32/CRC、zstd、剪贴板、接收状态机）
 - `packages/client/`：浏览器端 Vue 3 收发页（shadcn-vue + Tailwind v4，开发预览用）
@@ -522,10 +584,10 @@ cargo test --workspace
 
 # 新增的两个 crate 是 clippy 干净的；src-tauri / build.rs 里有一批历史告警，
 # 所以这里只对它们跑 clippy（要做全量门禁需先清掉历史告警）
-cargo clippy -p clipbeam-script -p clipbeam-scripting --all-targets
+cargo clippy -p script-engine -p clipbeam-scripting --all-targets
 
 # 只跑脚本引擎与能力集（第一次编译 QuickJS 的 C 代码较慢，之后很快）
-cargo test -p clipbeam-script
+cargo test -p script-engine
 cargo test -p clipbeam-scripting
 
 # Tauri 侧的协议层单元测试与跨实现 E2E
@@ -539,10 +601,14 @@ pnpm typecheck:scripts
 pnpm lint
 ```
 
-> `cargo test -p clipbeam-script` 覆盖：`$.file` / `$.sleep` / 取消、`TextDecoder` 的
-> GBK/BOM/fatal、扩展机制的注册/重名/声明一致性、TS 转译与端到端；
-> `cargo test -p clipbeam-scripting` 覆盖：md5/base32/zstd 与 Rust 侧独立实现对齐、
-> `typeStr`/`confirm` 的宿主语义、脚本目录与内置示例。
+> `cargo test -p script-engine` 覆盖：`sleep` / 取消 / 定时器 / `atob`·`btoa` /
+> `structuredClone`、`TextDecoder` 的 GBK/BOM/fatal、扩展机制的注册/重名/声明一致性、
+> TS 转译与端到端；
+> `cargo test -p clipbeam-scripting` 覆盖：入参多态、编码往返与严格解码、md5/crc32 与
+> Rust 侧独立实现对齐、压缩往返（gzip 产物再由 Rust 解一遍）、文件读写与**授权策略**
+> （拒绝 / 本次运行放行 / 跨运行失效）、`type_str`/`confirm` 的宿主语义、脚本目录与内置示例。
+> 命名空间的配置与校验（默认不挂、不可写绑定、冻结对象、非法名字/冲突名报错）由
+> `cargo test -p script-engine --test namespace` 覆盖。
 
 ---
 
@@ -600,8 +666,8 @@ CB1.<total>.<index>.<digest>.<data>
   均可被识别，但该区域需完整可见、未被遮挡/最小化，每屏会降采样到 1600px 宽再解码；
 - **安全**：两条通道都没有也不需要网络连接；CRC32 只防传输错误，不提供机密性，
   屏幕/键盘内容在本地处理，不上传任何数据；
-- **脚本与本机同权限**：`$.file` 能读任意文件、`$.typeStr` 会把内容敲进当前焦点窗口，
-  目前没有沙箱与权限确认，只运行可信脚本；
+- **脚本与本机同权限**：`$.read` 能读任意绝对路径、`$.type_str` 会把内容敲进当前焦点窗口；
+  读操作没有沙箱，修改操作会弹框确认（但确认框本身不是安全边界），只运行可信脚本；
 - **`$.confirm` 会一直等**：系统确认框不设超时，弹框期间 Worker 保持忙（其他任务无法启动）。
   此时按 Esc 只会**终止脚本**，系统弹框仍留在屏幕上，需要手动点掉；
 - **弹框时主窗口会临时显形**：托盘模式下主窗口是隐藏的，而系统弹框需要应用处于激活状态，

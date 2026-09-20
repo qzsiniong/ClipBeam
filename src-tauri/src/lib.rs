@@ -108,8 +108,9 @@ fn run_cli_script(path: &std::path::Path, raw: bool, token: &cancel::Cancellatio
         script_runner::run_source(
             &name,
             &source,
-            host as std::sync::Arc<dyn clipbeam_script::ScriptHost>,
-            clipbeam_script::CancellationToken::new(),
+            host as std::sync::Arc<dyn clipbeam_scripting::ScriptHost>,
+            std::sync::Arc::new(script_engine::StdoutConsole),
+            script_engine::CancelSignal::new(),
         )
         .await
     });
