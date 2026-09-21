@@ -17,8 +17,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use script_engine::ConsoleHook;
 use clipbeam_scripting::{ConfirmChoice, FileDecision, HostError, ScriptHost};
+use script_engine::ConsoleHook;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::{
     DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,

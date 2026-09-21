@@ -10,9 +10,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use script_engine::{CancelSignal, ConsoleHook, ScriptRuntime};
 use clipbeam_scripting::scripts::{self, ScriptMeta};
 use clipbeam_scripting::{runtime_options, ts, ScriptHost};
+use script_engine::{CancelSignal, ConsoleHook, ScriptRuntime};
 
 use crate::cancel::CancellationToken as WorkerCancel;
 

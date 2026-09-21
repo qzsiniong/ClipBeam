@@ -1,0 +1,126 @@
+name: Release
+
+# 打 tag（如 v0.1.0）即打包发布 macOS + Windows 安装包；
+# workflow_dispatch 只打包并上传 workflow artifact，不创建 Release（用来先试跑流水线）。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # 打包前先把 ci.yml 那套测试跑一遍（tag 指向的提交必须是通过测试的提交）
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  verify:
+    name: 校验版本号
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tag 与 tauri.conf.json 的 version 一致
+        shell: bash
+        run: |
+          set -euo pipefail
+          conf="$(jq -r .version src-tauri/tauri.conf.json)"
+          pkg="$(jq -r .version package.json)"
+          echo "ref=${GITHUB_REF}  tag=${GITHUB_REF_NAME}  tauri.conf.json=${conf}  package.json=${pkg}"
+          if [[ "${GITHUB_REF}" != refs/tags/* ]]; then
+            echo "手动触发：跳过 tag 校验"
+            exit 0
+          fi
+          if [[ "${GITHUB_REF_NAME#v}" != "${conf}" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 src-tauri/tauri.conf.json 的 version ${conf} 不一致（打包出来的安装包版本号取自后者）"
+            exit 1
+          fi
+          if [[ "${pkg}" != "${conf}" ]]; then
+            echo "::warning::package.json 的 version（${pkg}）与 ${conf} 不一致"
+          fi
+
+  build:
+    name: 打包 ${{ matrix.name }}
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS（universal：arm64 + x86_64）
+            platform: macos-latest
+            args: --target universal-apple-darwin
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+          # 只出 NSIS（-setup.exe）：MSI 走 WiX，需要 Windows 的 VBSCRIPT 可选功能才稳。
+          # 想同时出 MSI，把 args 改成 --bundles nsis,msi。
+          - name: Windows（NSIS 安装器）
+            platform: windows-latest
+            args: --bundles nsis
+            targets: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    env:
+      CLIPBEAM_SKIP_WEB_BUILD: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建远程接收页（build.rs 的 include_str! 输入）
+        run: pnpm build:web
+
+      # tag 触发：建/更新 Release 并上传安装包（draft 需要到 Releases 页面点一次 Publish）
+      - name: 打包并发布（tag）
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ClipBeam ${{ github.ref_name }}
+          releaseBody: |
+            下载对应平台安装包即可：
+
+            - macOS：`ClipBeam_*_universal.dmg`（arm64 + x86_64 通用）。**未签名/未公证**，首次打开需右键 →「打开」，或执行 `xattr -cr /Applications/ClipBeam.app`。
+            - Windows：`ClipBeam_*_x64-setup.exe`（NSIS 安装器，无需联网装 WebView2 之外的运行库）。**未签名**，SmartScreen 会提示「未知发布者」，选「更多信息 → 仍要运行」。
+          releaseDraft: true
+          generateReleaseNotes: true
+          # 本应用没有配 updater，避免让它去找 .sig / latest.json
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
+          uploadWorkflowArtifacts: true
+          retryAttempts: 1
+          args: ${{ matrix.args }}
+
+      # 手动触发：只打包 + 存 workflow artifact（约在 Actions 运行页面的 Artifacts 区）
+      - name: 打包（手动触发，只出 artifact）
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
+          uploadWorkflowArtifacts: true
+          retryAttempts: 1
+          args: ${{ matrix.args }}

@@ -516,22 +516,20 @@ where
                 body: e,
             },
         },
-        TaskKind::DeployType => {
-            match deploy::type_bootstrap(&cfg, &token, true, send_progress) {
-                typer::TypeResult::Completed(n) => TaskOutcome {
-                    title: "✓ 接收页引导包已输入".into(),
-                    body: format!("{n} 字符;请把记事本内容另存为 clipbeam.html 后打开"),
-                },
-                typer::TypeResult::Cancelled(n) => TaskOutcome {
-                    title: "部署已中止".into(),
-                    body: format!("约 {n} 字符可能已落入记事本,请清空后重试"),
-                },
-                typer::TypeResult::Failed(n, e) => TaskOutcome {
-                    title: "部署失败".into(),
-                    body: format!("{e}(已敲入约 {n} 字符,请清空记事本后重试)"),
-                },
-            }
-        }
+        TaskKind::DeployType => match deploy::type_bootstrap(&cfg, &token, true, send_progress) {
+            typer::TypeResult::Completed(n) => TaskOutcome {
+                title: "✓ 接收页引导包已输入".into(),
+                body: format!("{n} 字符;请把记事本内容另存为 clipbeam.html 后打开"),
+            },
+            typer::TypeResult::Cancelled(n) => TaskOutcome {
+                title: "部署已中止".into(),
+                body: format!("约 {n} 字符可能已落入记事本,请清空后重试"),
+            },
+            typer::TypeResult::Failed(n, e) => TaskOutcome {
+                title: "部署失败".into(),
+                body: format!("{e}(已敲入约 {n} 字符,请清空记事本后重试)"),
+            },
+        },
         TaskKind::Script => run_script_task(
             app,
             &token,
@@ -570,7 +568,18 @@ where
     // Console 面板只属于**本次运行**:上一轮的输出留在面板里只会干扰排查
     let console = app.state::<WorkerState>().console.clone();
     console.clear();
-    console.push("info", &format!("▶ 运行 {}{}", request.name, if crate::scripting::may_type(&request.source) { "(含键盘输出)" } else { "" }));
+    console.push(
+        "info",
+        &format!(
+            "▶ 运行 {}{}",
+            request.name,
+            if crate::scripting::may_type(&request.source) {
+                "(含键盘输出)"
+            } else {
+                ""
+            }
+        ),
+    );
 
     // 待命门闩:惰性放行 —— 只有真的要把内容打进目标窗口时才需要用户先点一下目标窗口
     let standby = Arc::new(crate::standby::StandbyGate::new());
@@ -649,10 +658,7 @@ where
         Err(err) => {
             let text = crate::script_runner::describe_error(&err);
             if text.contains("已中止") {
-                console.push(
-                    "warn",
-                    &format!("脚本已中止(已输出 {typed} 个字符)"),
-                );
+                console.push("warn", &format!("脚本已中止(已输出 {typed} 个字符)"));
                 TaskOutcome {
                     title: "脚本已中止".into(),
                     body: format!("已敲入 {typed} 个字符,请检查目标窗口内容是否完整"),

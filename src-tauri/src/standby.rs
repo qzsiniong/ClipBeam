@@ -222,7 +222,10 @@ mod tests {
             waited >= Duration::from_millis(100),
             "应当真的等过一段时间：{waited:?}"
         );
-        assert!(waited < Duration::from_secs(2), "放行后应当及时返回：{waited:?}");
+        assert!(
+            waited < Duration::from_secs(2),
+            "放行后应当及时返回：{waited:?}"
+        );
     }
 
     #[test]

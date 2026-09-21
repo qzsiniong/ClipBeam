@@ -65,7 +65,10 @@ fn run_cli_script(path: &std::path::Path, raw: bool, token: &cancel::Cancellatio
     // 首次运行顺带把内置示例落到脚本目录,方便用户照抄
     match clipbeam_scripting::scripts::ensure_seed_scripts() {
         Ok(0) => {}
-        Ok(n) => eprintln!("已在 {} 写入 {n} 个内置示例脚本", script_runner::dir_display()),
+        Ok(n) => eprintln!(
+            "已在 {} 写入 {n} 个内置示例脚本",
+            script_runner::dir_display()
+        ),
         Err(e) => eprintln!("提示:脚本目录初始化失败({e}),不影响本次运行"),
     }
 
@@ -283,7 +286,10 @@ pub fn run() {
             // 首次启动把内置示例脚本写进脚本目录(已存在的文件不覆盖)
             match clipbeam_scripting::scripts::ensure_seed_scripts() {
                 Ok(0) => {}
-                Ok(n) => log::info!("已写入 {n} 个内置示例脚本到 {}", script_runner::dir_display()),
+                Ok(n) => log::info!(
+                    "已写入 {n} 个内置示例脚本到 {}",
+                    script_runner::dir_display()
+                ),
                 Err(e) => log::warn!("初始化脚本目录失败: {e}"),
             }
             tray::build(app, &cfg)?;
@@ -425,10 +431,7 @@ mod dock_icon_tests {
     fn only_scripting_window_wants_a_dock_icon() {
         assert!(window_wants_dock_icon("scripting"));
         for label in ["main", "progress", "standby"] {
-            assert!(
-                !window_wants_dock_icon(label),
-                "{label} 不该触发 Dock 图标"
-            );
+            assert!(!window_wants_dock_icon(label), "{label} 不该触发 Dock 图标");
         }
     }
 }

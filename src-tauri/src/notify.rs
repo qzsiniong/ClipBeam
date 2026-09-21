@@ -15,9 +15,8 @@ pub fn notify(title: &str, body: &str) {
             // 一次选对：在 .app 包内运行 → 自身 bundle id（通知归属 ClipBeam，
             // 打包后 LaunchServices 可查到）；裸跑（cargo run / 联调）→ 一定
             // 存在的 com.apple.finder。
-            let in_app_bundle = std::env::current_exe().is_ok_and(|p| {
-                p.to_string_lossy().contains(".app/Contents/MacOS/")
-            });
+            let in_app_bundle = std::env::current_exe()
+                .is_ok_and(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"));
             let ident = if in_app_bundle {
                 "com.clipbeam.app"
             } else {

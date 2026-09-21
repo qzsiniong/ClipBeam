@@ -175,14 +175,24 @@ fn build_web_client(manifest_dir: &Path) {
     }
 
     if matches!(std::env::var("CLIPBEAM_SKIP_WEB_BUILD"), Ok(v) if v == "1") {
-        println!("cargo:warning=client-vanilla 产物已过期，但 CLIPBEAM_SKIP_WEB_BUILD=1，跳过自动构建");
+        println!(
+            "cargo:warning=client-vanilla 产物已过期，但 CLIPBEAM_SKIP_WEB_BUILD=1，跳过自动构建"
+        );
         return;
     }
 
-    println!("cargo:warning=client-vanilla 构建中(pnpm --filter @clipbeam/client-vanilla build)...");
+    println!(
+        "cargo:warning=client-vanilla 构建中(pnpm --filter @clipbeam/client-vanilla build)..."
+    );
     let status = if cfg!(windows) {
         Command::new("cmd")
-            .args(["/C", "pnpm", "--filter", "@clipbeam/client-vanilla", "build"])
+            .args([
+                "/C",
+                "pnpm",
+                "--filter",
+                "@clipbeam/client-vanilla",
+                "build",
+            ])
             .current_dir(&root)
             .status()
     } else {

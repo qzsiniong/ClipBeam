@@ -7,9 +7,10 @@
 use crate::config::Config;
 use image::{ImageBuffer, Rgba, RgbaImage};
 use tauri::{
-    App, AppHandle, Manager, Wry, image::Image,
+    image::Image,
     menu::{IconMenuItem, IconMenuItemBuilder, MenuBuilder},
     tray::TrayIconBuilder,
+    App, AppHandle, Manager, Wry,
 };
 
 pub const M_STATUS: &str = "status";
@@ -46,19 +47,16 @@ pub fn build(app: &App, cfg: &Config) -> tauri::Result<()> {
         .icon(icon_recv())
         .build(app)?;
 
-    let status = IconMenuItemBuilder::with_id(M_STATUS, "状态:空闲").enabled(false).build(app)?;
-    let deploy_type = IconMenuItemBuilder::with_id(
-        M_DEPLOY_TYPE,
-        "部署接收页到远程(键盘输入,约 3 分钟)",
-    )
-    .icon(icon_deploy_type())
-    .build(app)?;
-    let deploy_copy = IconMenuItemBuilder::with_id(
-        M_DEPLOY_COPY,
-        "部署接收页(复制到宿主机剪贴板)",
-    )
-    .icon(icon_deploy_copy())
-    .build(app)?;
+    let status = IconMenuItemBuilder::with_id(M_STATUS, "状态:空闲")
+        .enabled(false)
+        .build(app)?;
+    let deploy_type =
+        IconMenuItemBuilder::with_id(M_DEPLOY_TYPE, "部署接收页到远程(键盘输入,约 3 分钟)")
+            .icon(icon_deploy_type())
+            .build(app)?;
+    let deploy_copy = IconMenuItemBuilder::with_id(M_DEPLOY_COPY, "部署接收页(复制到宿主机剪贴板)")
+        .icon(icon_deploy_copy())
+        .build(app)?;
     let scripts = IconMenuItemBuilder::with_id(M_SCRIPTS, "运行脚本…")
         .icon(icon_scripts())
         .build(app)?;
@@ -174,8 +172,7 @@ const MENU_ICON: u32 = 32;
 
 /// 在 32x32 透明画布上执行绘制并转成 Tauri Image。
 fn menu_icon(draw: impl Fn(&mut RgbaImage)) -> Image<'static> {
-    let mut img: RgbaImage =
-        ImageBuffer::from_pixel(MENU_ICON, MENU_ICON, Rgba([0, 0, 0, 0]));
+    let mut img: RgbaImage = ImageBuffer::from_pixel(MENU_ICON, MENU_ICON, Rgba([0, 0, 0, 0]));
     draw(&mut img);
     Image::new_owned(img.into_raw(), MENU_ICON, MENU_ICON)
 }
@@ -227,13 +224,7 @@ fn ico_disc(img: &mut RgbaImage, cx: i32, cy: i32, r: i32, c: Rgba<u8>) {
 }
 
 /// 实心三角形(重心坐标判定)。点顺序任意。
-fn ico_triangle(
-    img: &mut RgbaImage,
-    p0: (f32, f32),
-    p1: (f32, f32),
-    p2: (f32, f32),
-    c: Rgba<u8>,
-) {
+fn ico_triangle(img: &mut RgbaImage, p0: (f32, f32), p1: (f32, f32), p2: (f32, f32), c: Rgba<u8>) {
     let minx = p0.0.min(p1.0).min(p2.0).floor() as i32;
     let maxx = p0.0.max(p1.0).max(p2.0).ceil() as i32;
     let miny = p0.1.min(p1.1).min(p2.1).floor() as i32;
@@ -257,15 +248,7 @@ fn ico_triangle(
 }
 
 /// 粗细为 thickness 的线段(像素中心到线段距离 <= thickness/2)。
-fn ico_line(
-    img: &mut RgbaImage,
-    x0: f32,
-    y0: f32,
-    x1: f32,
-    y1: f32,
-    thickness: f32,
-    c: Rgba<u8>,
-) {
+fn ico_line(img: &mut RgbaImage, x0: f32, y0: f32, x1: f32, y1: f32, thickness: f32, c: Rgba<u8>) {
     let dx = x1 - x0;
     let dy = y1 - y0;
     let len2 = dx * dx + dy * dy;
