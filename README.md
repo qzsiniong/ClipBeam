@@ -284,7 +284,7 @@ for (let i = 0; i < parts.length; i++) {
 |---|---|
 | `$.bytes(data)` | 统一成 `ArrayBuffer`（字符串按 UTF-8） |
 | `$.str(data, encoding?)` | 字节 → 文本（默认 `utf-8`，支持全部 WHATWG 标签） |
-| `$.chunks(data, chunkSize?)` | 按 `chunkSize` 分片（默认 1024），返回 `ArrayBuffer[]` |
+| `$.chunks(data, chunkSize?)` | 按 `chunkSize` 分片（默认 1024）：字符串按**码点**切返回 `string[]`，二进制按**字节**切返回 `ArrayBuffer[]` |
 | `$.hex` / `$.hex_upper` / `$.hex_decode` | 十六进制编解码（解码大小写均可） |
 | `$.base32` / `_nopad` / `_lower` / `_lower_nopad` | RFC4648 Base32：大写+填充 / 大写无填充 / 小写+填充 / 小写无填充 |
 | `$.base32_decode` / `_nopad_decode` / `_lower_decode` / `_lower_nopad_decode` | 与上面一一对应；**严格**校验大小写与填充 |

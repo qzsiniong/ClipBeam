@@ -57,7 +57,7 @@ let running = false
 const CAPABILITIES: MockCapability[] = [
   ['bytes', 'bytes(data: string | ArrayBuffer | ArrayBufferView) -> ArrayBuffer', '统一成字节'],
   ['str', 'str(data: string | ArrayBuffer | ArrayBufferView, encoding?: string) -> string', '字节 → 文本'],
-  ['chunks', 'chunks(data: string | ArrayBuffer | ArrayBufferView, chunkSize?: number) -> ArrayBuffer[]', '按大小分片'],
+  ['chunks', 'chunks(data: string, chunkSize?: number) -> string[]; chunks(data: ArrayBuffer | ArrayBufferView, chunkSize?: number) -> ArrayBuffer[]', '按大小分片（字符串按码点、二进制按字节）'],
   ['hex', 'hex(data: string | ArrayBuffer | ArrayBufferView) -> string', '十六进制编码，小写'],
   ['base32_nopad', 'base32_nopad(data: string | ArrayBuffer | ArrayBufferView) -> string', 'RFC4648 Base32（大写无填充）'],
   ['base64_url_nopad', 'base64_url_nopad(data: string | ArrayBuffer | ArrayBufferView) -> string', 'URL-safe Base64（无填充）'],

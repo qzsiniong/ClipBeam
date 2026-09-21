@@ -45,11 +45,14 @@ interface ClipBeam {
 	str(data: BinaryInput, encoding?: string): string
 
 	/**
-	 * 按 `chunkSize` 切片（默认 1024 字节），返回互相独立的分片。
+	 * 按 `chunkSize` 分片（默认 1024），返回互相独立的分片，拼接回去与原文一致。
+	 *
+	 * - 字符串入参：按 **Unicode 码点**切，返回 `string[]`（不会把 emoji 的代理对切半）。
+	 * - 二进制入参：按**字节**切，返回 `ArrayBuffer[]`。
 	 *
 	 * 压缩与切片是分开的：`$.zstd` 只压缩，要分片再调 `$.chunks`。
 	 */
-	chunks(data: BinaryInput, chunkSize?: number): ArrayBuffer[]
+	chunks<T extends BinaryInput>(data: T, chunkSize?: number): T extends string ? string[] : ArrayBuffer[]
 
 	// ── 编码 ────────────────────────────────────────────────────────────────
 

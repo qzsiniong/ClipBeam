@@ -705,6 +705,50 @@ async fn chunks_split_and_reassemble() {
     assert_eq!(values[2], values[3], "拼接后应当与原文一致");
 }
 
+/// `$.chunks` 传字符串时返回 `string[]`：按 **Unicode 码点**切，拼接回去与原文一致。
+#[tokio::test]
+async fn chunks_on_string_returns_strings() {
+    let runtime = compute_runtime().await;
+
+    let values: Vec<String> = runtime
+        .eval(
+            r#"
+            const parts = $.chunks("ab👍cd", 2);
+            const chinese = $.chunks("你好世界", 2);
+            const empty = $.chunks("", 4);
+            const zero = $.chunks("abc", 0);
+            const huge = $.chunks("abc", 9999);
+            const binary = $.chunks(new Uint8Array([1, 2, 3, 4, 5]), 2);
+            [
+              parts.every((part) => typeof part === "string").toString(),
+              parts.join("|"),
+              parts.join(""),
+              chinese.join("|"),
+              empty.length.toString(),
+              zero.join("|"),
+              huge.length.toString(),
+              huge[0],
+              binary.every((part) => part instanceof ArrayBuffer).toString(),
+              binary.map((part) => part.byteLength).join(","),
+            ]
+            "#,
+        )
+        .await
+        .expect("脚本执行失败");
+
+    assert_eq!(values[0], "true", "字符串入参应当返回 string[]");
+    // "ab👍cd" 是 5 个码点（emoji 算 1 个），按 2 切：ab / 👍c / d
+    assert_eq!(values[1], "ab|👍c|d", "按码点切，emoji 不能被切开");
+    assert_eq!(values[2], "ab👍cd", "拼接回去必须与原文一致");
+    assert_eq!(values[3], "你好|世界");
+    assert_eq!(values[4], "0", "空串返回空数组");
+    assert_eq!(values[5], "a|b|c", "chunkSize 为 0 时按 1 处理");
+    assert_eq!(values[6], "1", "chunkSize 超过长度时只有一片");
+    assert_eq!(values[7], "abc");
+    assert_eq!(values[8], "true", "二进制入参仍是 ArrayBuffer[]（未回归）");
+    assert_eq!(values[9], "2,2,1", "二进制仍按字节切");
+}
+
 // ── 文件系统 ────────────────────────────────────────────────────────────────
 
 /// 只读操作走一遍：read / read_text / exists / stat / list。
