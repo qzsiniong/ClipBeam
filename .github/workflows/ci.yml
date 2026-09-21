@@ -49,13 +49,37 @@ jobs:
       - name: 前端构建（vue-tsc + vite）
         run: pnpm build
 
-  rust:
-    name: Rust（${{ matrix.os }}）
+  # ubuntu 不装 Linux 图形栈依赖（gtk / webkit2gtk / pipewire / wayland …）：
+  # 这里只测两个跨平台 crate。src-tauri（clipbeam）的编译 + lint + 测试
+  # 交给 rust-app，在它的两个目标平台（macOS / Windows）上全量跑。
+  rust-crates:
+    name: Rust crates（ubuntu）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 格式检查（rustfmt，与平台无关，覆盖整个 workspace）
+        run: cargo fmt --all --check
+
+      - name: Clippy（-D warnings）
+        run: cargo clippy -p script-engine -p clipbeam-scripting --all-targets -- -D warnings
+
+      - name: 测试（脚本引擎 / 能力集）
+        run: cargo test -p script-engine -p clipbeam-scripting --no-fail-fast
+
+  rust-app:
+    name: Rust 应用（${{ matrix.os }}）
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -70,7 +94,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
 
@@ -80,13 +104,10 @@ jobs:
       - name: 构建远程接收页（build.rs 的 include_str! 输入）
         run: pnpm build:web
 
-      - name: 格式检查（rustfmt，与平台无关，只跑一次）
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo fmt --all --check
-
-      # 三个平台都跑：macOS / Windows 专属的 cfg 分支只有在本平台才会被编译到
+      # 两个平台都跑：macOS / Windows 专属的 cfg 分支只有在本平台才会被编译到
       - name: Clippy（-D warnings）
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # --no-fail-fast：一个 target 挂了也把其余 target 跑完，一次拿到全部失败
       - name: 测试（脚本引擎 / 能力集 / Tauri）
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast

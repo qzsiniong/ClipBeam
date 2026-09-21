@@ -566,10 +566,14 @@ mod tests {
     /// 绝对路径的原样写法（Unix 与 Windows 盘符）。
     #[test]
     fn accepts_absolute_paths() {
+        // /tmp/a.txt 只在 Unix 上算绝对路径：Windows 上既没有盘符也不是 UNC，按设计拒绝
+        #[cfg(unix)]
         assert_eq!(
             resolve_path("/tmp/a.txt").unwrap(),
             PathBuf::from("/tmp/a.txt")
         );
+        #[cfg(windows)]
+        assert!(resolve_path("/tmp/a.txt").is_err());
         assert_eq!(
             resolve_path("C:/Users/me/a.txt").unwrap(),
             PathBuf::from("C:/Users/me/a.txt")
@@ -608,11 +612,14 @@ mod tests {
             resolve_path("/cygdrive/c/Users/me").unwrap(),
             PathBuf::from("C:/Users/me")
         );
-        // 单个字母但不是盘符形式（`/dev/null`）要保持原样
+        // 单个字母但不是盘符形式（`/dev/null`）：Unix 上保持原样，Windows 上不是绝对路径故拒绝
+        #[cfg(unix)]
         assert_eq!(
             resolve_path("/dev/null").unwrap(),
             PathBuf::from("/dev/null")
         );
+        #[cfg(windows)]
+        assert!(resolve_path("/dev/null").is_err());
     }
 
     /// 「本目录都允许」记的是目标的父目录。
