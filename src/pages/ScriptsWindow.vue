@@ -349,7 +349,8 @@ function warnUnsaved(event: BeforeUnloadEvent) {
       >
         <!-- 编辑器：最大化时被压到 0 高（仍挂载，保住撤销历史） -->
         <SplitterPanel
-          :min-size="25"
+          :min-size="100"
+          size-unit="px"
           class="min-h-0 overflow-hidden"
           :class="consoleView === 'maximized' ? 'shrink-0! grow-0! basis-0!' : ''"
         >
@@ -388,7 +389,6 @@ function warnUnsaved(event: BeforeUnloadEvent) {
           size-unit="px"
           :default-size="208"
           :min-size="72"
-          :max-size="480"
           class="min-h-0 overflow-hidden"
           :class="consoleView === 'collapsed'
             ? 'shrink-0! grow-0! basis-9!'
