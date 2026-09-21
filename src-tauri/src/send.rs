@@ -1,7 +1,10 @@
 //! 宿主机 → 远程：读本机剪贴板文本 → 组键盘帧 → enigo 逐键发送（协议 A）。
 
+use std::sync::Arc;
+
 use crate::cancel::CancellationToken;
 use crate::config::Config;
+use crate::standby::StandbyGate;
 use crate::typer::{TypeResult, Typer};
 
 #[derive(Debug)]
@@ -21,12 +24,15 @@ pub enum SendReport {
 ///
 /// 前置条件：触发时用户已把焦点切到远程页面。函数内仅等待 `settle` 让热键
 /// 修饰键抬起，不做任何焦点切换。
+/// `standby` 是待命门闩（GUI 任务注入；CLI 传 `None`）：逐键发送期间会校验焦点，
+/// 焦点换了窗口就自动重新待命，用户确认后从断点继续。
 /// `on_progress(sent, total)` 在每个字符发送后触发。
 pub fn run_once(
     cfg: &Config,
     raw: bool,
     cancel: &CancellationToken,
     settle: bool,
+    standby: Option<Arc<StandbyGate>>,
     mut on_progress: impl FnMut(usize, usize),
 ) -> SendReport {
     // 1. 读剪贴板
@@ -76,6 +82,9 @@ pub fn run_once(
         Ok(t) => t,
         Err(e) => return SendReport::Error(e),
     };
+    if let Some(gate) = standby {
+        typer.attach_standby(gate);
+    }
     match typer.type_str(&frame, &mut on_progress) {
         TypeResult::Completed(_) => SendReport::Done {
             frame_chars,

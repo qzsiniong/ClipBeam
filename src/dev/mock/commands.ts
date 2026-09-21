@@ -106,6 +106,8 @@ const COMMANDS = new Map<string, (payload: InvokeArgs | undefined) => unknown>([
     void emitEvent('worker-cancelled')
     return null
   }],
+  // 浏览器里没有真的待命窗口：把请求的状态原样回传，让待命页的暂停/恢复按钮能正常切换
+  ['set_standby_paused', payload => Boolean(arg(payload, 'paused'))],
   ['open_scripts_window', () => {
     console.info('[clipbeam-mock] 「打开脚本窗口」在浏览器里对应的做法是另开一个 tab：/?window=scripting#/scripting')
     return null

@@ -22,6 +22,7 @@ struct TestHost {
     confirm_answer: AtomicUsize, // 0=No 1=Yes 2=Abort
     file_requests: Mutex<Vec<String>>,
     file_answer: Mutex<FileDecision>,
+    focus_requests: Mutex<Vec<String>>,
 }
 
 impl Default for TestHost {
@@ -33,6 +34,7 @@ impl Default for TestHost {
             file_requests: Mutex::new(Vec::new()),
             // 默认放行一次：文件读写测试不该被授权逻辑挡住
             file_answer: Mutex::new(FileDecision::Allow),
+            focus_requests: Mutex::new(Vec::new()),
         }
     }
 }
@@ -68,6 +70,10 @@ impl TestHost {
     fn file_requests(&self) -> Vec<String> {
         self.file_requests.lock().unwrap().clone()
     }
+
+    fn focus_requests(&self) -> Vec<String> {
+        self.focus_requests.lock().unwrap().clone()
+    }
 }
 
 impl ScriptHost for TestHost {
@@ -99,6 +105,11 @@ impl ScriptHost for TestHost {
             .unwrap()
             .push(format!("{action} {}", path.display()));
         Ok(*self.file_answer.lock().unwrap())
+    }
+
+    fn request_focus(&self, hint: &str) -> Result<(), HostError> {
+        self.focus_requests.lock().unwrap().push(hint.to_string());
+        Ok(())
     }
 }
 
@@ -978,6 +989,28 @@ async fn path_flavours_are_accepted() {
 
 // ── 宿主交互 ────────────────────────────────────────────────────────────────
 
+/// `$.request_focus` 把提示语交给宿主；省略参数时传空串（宿主用默认文案）。
+#[tokio::test]
+async fn request_focus_reaches_host() {
+    let host = Arc::new(TestHost::default());
+    let runtime = runtime_with(host.clone()).await;
+
+    runtime
+        .eval::<()>(
+            r#"
+            $.request_focus("请点击远程记事本");
+            $.request_focus();
+            "#,
+        )
+        .await
+        .expect("脚本执行失败");
+
+    assert_eq!(
+        host.focus_requests(),
+        vec!["请点击远程记事本".to_string(), String::new()]
+    );
+}
+
 /// `$.type_str` 把文本交给宿主。
 #[tokio::test]
 async fn type_str_reaches_host() {
@@ -1287,7 +1320,7 @@ fn methods_declared_in_spec() -> Vec<String> {
 #[test]
 fn extensions_are_listed() {
     let extensions = extensions();
-    assert_eq!(extensions.len(), 14, "应当有 14 个使用方扩展");
+    assert_eq!(extensions.len(), 15, "应当有 15 个使用方扩展");
 
     let names: Vec<String> = extensions
         .iter()
@@ -1296,7 +1329,7 @@ fn extensions_are_listed() {
         .collect();
 
     assert_eq!(names.first().map(String::as_str), Some("bytes"));
-    assert_eq!(names.last().map(String::as_str), Some("confirm"));
+    assert_eq!(names.last().map(String::as_str), Some("request_focus"));
     assert!(names.contains(&"md5".to_string()));
     assert!(names.contains(&"type_str".to_string()));
     assert!(
@@ -1310,7 +1343,7 @@ fn extensions_are_listed() {
 fn runtime_options_helper_has_all_extensions() {
     let console: Arc<dyn ConsoleHook> = Arc::new(StdoutConsole);
     let options = runtime_options(Arc::new(TestHost::default()), console);
-    assert_eq!(options.extensions.len(), 14);
+    assert_eq!(options.extensions.len(), 15);
     assert!(options.prepare.is_some(), "宿主应当通过 prepare 钩子注入");
     assert_eq!(
         options.namespace.as_deref(),

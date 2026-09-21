@@ -100,6 +100,17 @@ pub trait ScriptHost: Send + Sync + 'static {
     /// 取消后返回 [`HostError::Cancelled`]。
     fn type_str(&self, text: &str, delay_ms: u64) -> Result<(), HostError>;
 
+    /// 请求用户把焦点切到目标窗口（`$.request_focus`）。
+    ///
+    /// GUI 下弹出待命窗口并阻塞等待用户确认；`hint` 是显示给用户的提示
+    /// （例如「请点击远程记事本」），空串表示用默认文案。与 [`ScriptHost::type_str`] 一样是
+    /// **同步阻塞**调用：返回即表示「从现在起焦点在用户选定的目标窗口上」，随后的输出才安全。
+    ///
+    /// 默认空实现：headless / CLI 宿主没有待命窗口，直接返回（脚本仍可在终端里跑）。
+    fn request_focus(&self, _hint: &str) -> Result<(), HostError> {
+        Ok(())
+    }
+
     /// 上报输出进度（已输出字符数 / 总字符数），供进度条展示。
     ///
     /// 默认空实现：headless 场景不需要进度。实现应当自行节流，调用可能非常频繁。

@@ -12,6 +12,8 @@ use log::debug;
 use crate::cancel::CancellationToken;
 use crate::config::Config;
 use crate::keymap::{get_key_info, KeyAction};
+use crate::standby::StandbyGate;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -28,6 +30,9 @@ pub struct Typer {
     delay: Duration,
     cancel: CancellationToken,
     send_real_keys: bool,
+    /// 待命门闩（可选）：每个字符前校验「焦点还在用户确认过的窗口上」。
+    /// 发送/部署路径由 Worker 注入；CLI 与其它无界面宿主不注入。
+    standby: Option<Arc<StandbyGate>>,
     // macOS: ManuallyDrop 跳过 enigo 的 Drop——其 Drop 内有累积 sleep 逻辑
     //（每次按键 update_wait_time 累加 20ms，长文本 Drop 时会阻塞数秒甚至数分钟）。
     #[cfg(target_os = "macos")]
@@ -44,11 +49,17 @@ impl Typer {
             delay: cfg.key_delay(),
             cancel,
             send_real_keys: cfg.send_real_keys,
+            standby: None,
             #[cfg(target_os = "macos")]
             enigo: std::mem::ManuallyDrop::new(enigo),
             #[cfg(not(target_os = "macos"))]
             enigo,
         })
+    }
+
+    /// 注入待命门闩：`type_str` 会在每个字符前校验焦点，必要时（重新）弹待命窗口。
+    pub fn attach_standby(&mut self, gate: Arc<StandbyGate>) {
+        self.standby = Some(gate);
     }
 
     /// 当前是否真的发送按键（false = 演练，只统计进度不注入事件）。
@@ -141,17 +152,29 @@ impl Typer {
     /// 逐字符输入。开始前与每个字符前都检查取消令牌，
     /// 因此最坏停止延迟约等于一个键间隔（默认 3ms）。
     /// `on_progress(sent, total)` 在每个字符发送后触发，可用于进度展示。
+    ///
+    /// 注入了待命门闩时，每个字符前还会（节流地）校验焦点：焦点换了窗口就自动重新待命，
+    /// 用户确认后**从断点继续**；等待期间被取消则返回 `Cancelled(i)`。
     pub fn type_str(
         &mut self,
         text: &str,
         on_progress: &mut impl FnMut(usize, usize),
     ) -> TypeResult {
         let total = text.chars().count();
+        let dry_run = !self.send_real_keys;
         for (i, c) in text.chars().enumerate() {
             if self.cancel.is_cancelled() {
                 return TypeResult::Cancelled(i);
             }
-            if let Err(e) = self.send_char(c, !self.send_real_keys) {
+            // 干跑不注入任何按键，焦点无关紧要 —— 不必为此弹待命窗口
+            if !dry_run {
+                if let Some(gate) = &self.standby {
+                    if gate.ensure_ready().is_err() {
+                        return TypeResult::Cancelled(i);
+                    }
+                }
+            }
+            if let Err(e) = self.send_char(c, dry_run) {
                 return TypeResult::Failed(i, format!("键盘事件发送失败: {e}"));
             }
             on_progress(i + 1, total);

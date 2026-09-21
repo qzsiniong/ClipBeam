@@ -54,6 +54,8 @@ env_logger = "0.11"
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6"
 core-graphics = "0.24"
+# 焦点探测（窗口级）：AX API 读焦点窗口，NSWorkspace 做应用级回退
+core-foundation = "0.10"
 # macOS 27+: 设置 NSMenuItem.preferredImageVisibility=.visible,避免菜单图标被默认隐藏
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = [
@@ -61,10 +63,19 @@ objc2-app-kit = { version = "0.3", features = [
   "NSMenu",
   "NSMenuItem",
   "NSStatusItem",
+  # 焦点探测：frontmostApplication / processIdentifier / bundleIdentifier / localizedName
+  "NSWorkspace",
+  "NSRunningApplication",
+  "libc",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winrt-notification = "0.5"
+# 焦点探测（窗口级）：GetForegroundWindow 等
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"

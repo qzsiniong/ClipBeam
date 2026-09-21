@@ -32,6 +32,14 @@ extension! {
         "向用户提问；回答「是」为 true，「否」为 false，用户中止时抛异常";
 }
 
+extension! {
+    /// `$.request_focus`。
+    pub struct RequestFocusExtension;
+    "request_focus" => js_request_focus,
+        "request_focus(hint?: string) -> void",
+        "请求用户把焦点切到目标窗口（GUI 下弹出待命窗口并等待确认）；hint 是显示给用户的提示";
+}
+
 /// `type_str(text, delayMs = 0) -> void`
 ///
 /// 同步阻塞（宿主负责每个字符之间的等待），因此输出顺序与脚本执行顺序严格一致。
@@ -62,4 +70,20 @@ async fn js_confirm<'js>(ctx: Ctx<'js>, message: String) -> QjsResult<bool> {
         Ok(ConfirmChoice::Abort) => Err(throw_cancelled(&ctx)),
         Err(err) => Err(throw_host_error(&ctx, err)),
     }
+}
+
+/// `request_focus(hint?) -> void`
+///
+/// **同步**阻塞到用户确认（或超时/中止）—— 与 [`js_type_str`] 一致：返回即表示「焦点已经在
+/// 用户选定的目标窗口上」，脚本可以放心继续输出。脚本要在**中途**换一个输出目标时显式调用它
+/// （例如先打进浏览器、再打进记事本）；不调用也能靠宿主的自动焦点校验兜住。
+fn js_request_focus<'js>(ctx: Ctx<'js>, hint: Opt<String>) -> QjsResult<()> {
+    let host = require_host(&ctx, "$.request_focus")?;
+
+    if cancelled(&ctx) {
+        return Err(throw_cancelled(&ctx));
+    }
+
+    host.request_focus(hint.0.as_deref().unwrap_or(""))
+        .map_err(|err| throw_host_error(&ctx, err))
 }

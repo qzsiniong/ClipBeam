@@ -62,10 +62,8 @@ pub struct TauriScriptHost {
     cancel: WorkerCancel,
     /// 与任务共享的进度计数（`(已敲入, 总数)`）。
     progress: Arc<std::sync::RwLock<(usize, usize)>>,
-    /// 待命门闩：首次输出前确保用户已把焦点切到目标窗口。
+    /// 待命门闩：首次输出前确保用户已把焦点切到目标窗口，之后逐字符校验焦点。
     standby: Arc<StandbyGate>,
-    /// 兜底待命超时后的收尾（提示用户 + 取消任务），由 worker 注入。
-    on_standby_cancel: CancelHook,
     /// 脚本窗口 Console 面板的输出缓冲。
     console: Arc<ConsoleBuffer>,
     typed: AtomicUsize,
@@ -80,7 +78,6 @@ impl TauriScriptHost {
         cancel: WorkerCancel,
         standby: Arc<StandbyGate>,
         progress: Arc<std::sync::RwLock<(usize, usize)>>,
-        on_standby_cancel: CancelHook,
         console: Arc<ConsoleBuffer>,
     ) -> Self {
         Self {
@@ -89,7 +86,6 @@ impl TauriScriptHost {
             cancel,
             progress,
             standby,
-            on_standby_cancel,
             console,
             typed: AtomicUsize::new(0),
             last_progress_ms: AtomicU64::new(0),
@@ -181,13 +177,6 @@ impl TauriScriptHost {
 
 impl ScriptHost for TauriScriptHost {
     fn type_str(&self, text: &str, delay_ms: u64) -> Result<(), HostError> {
-        // 首次输出前先确保焦点在目标窗口（见 StandbyGate 的说明）。
-        // 空串不注入任何按键，没必要为此弹待命窗口。
-        if !text.is_empty() {
-            self.standby
-                .ensure_ready(&self.app, &self.cancel, self.on_standby_cancel.clone())?;
-        }
-
         let mut guard = self.typer.lock().unwrap();
         if guard.is_none() {
             let cfg = self
@@ -204,14 +193,19 @@ impl ScriptHost for TauriScriptHost {
 
         let total = text.chars().count();
         let mut snippet = String::new();
+        let dry_run = !typer.send_real_keys();
 
         for ch in text.chars() {
             if self.cancel.is_cancelled() {
                 return Err(HostError::Cancelled);
             }
-            typer
-                .send_char(ch, !typer.send_real_keys())
-                .map_err(HostError::Failed)?;
+            // 每个字符前（节流地）确保焦点还在用户确认过的目标窗口上：
+            // 未确认过就先弹待命窗口；焦点变了就自动重新待命，确认后从断点继续。
+            // 干跑不注入任何按键，焦点无关紧要 —— 不必为此弹待命窗口。
+            if !dry_run {
+                self.standby.ensure_ready()?;
+            }
+            typer.send_char(ch, dry_run).map_err(HostError::Failed)?;
 
             let typed = self.typed.fetch_add(1, Ordering::Relaxed) + 1;
             if snippet.chars().count() < SNIPPET_LIMIT {
@@ -241,6 +235,11 @@ impl ScriptHost for TauriScriptHost {
             // Cancel = 用户要求停掉脚本；Custom 只会在换用 *Custom 按钮时出现，一并按中止处理
             _ => Err(HostError::Cancelled),
         }
+    }
+
+    /// `$.request_focus`：显式要求一轮新的焦点确认，`hint` 显示在待命窗口上。
+    fn request_focus(&self, hint: &str) -> Result<(), HostError> {
+        self.standby.request_focus(hint)
     }
 
     /// 文件修改授权：三个按钮分别是「允许一次 / 本次运行内该目录都允许 / 拒绝」。

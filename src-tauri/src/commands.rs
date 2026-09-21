@@ -78,6 +78,15 @@ pub async fn cancel_task(app: AppHandle, state: State<'_, WorkerState>) -> Resul
     Ok(())
 }
 
+/// 暂停/恢复待命窗口的失焦检测（用户需要多次切换焦点时用，见 [`crate::standby::StandbyControl`]）。
+///
+/// 返回**生效后的「是否暂停」**（前端直接拿它当按钮状态）；没有进行中的待命时返回 `false`
+/// （这一轮已经结束，不该把按钮停在「已暂停」上）。每轮待命的开始都会复位成「未暂停」。
+#[tauri::command]
+pub fn set_standby_paused(state: State<'_, WorkerState>, paused: bool) -> Result<bool, String> {
+    Ok(state.standby_ctl.set_paused(paused))
+}
+
 /// 查询当前任务状态快照。
 #[tauri::command]
 pub async fn get_task_status(state: State<'_, WorkerState>) -> Result<Status, String> {

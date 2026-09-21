@@ -2,13 +2,14 @@
 //! 全 ASCII、单行、无外部依赖——通过键盘逐字符打进远程记事本，
 //! 另存为 `.html` 打开后，引导脚本解码并替换文档，得到完整接收页。
 
-use std::time::Duration;
+use std::sync::Arc;
 
 use arboard::Clipboard;
 
 use crate::cancel::CancellationToken;
 use crate::config::Config;
 use crate::protocol::b32_encode_lower;
+use crate::standby::StandbyGate;
 use crate::typer::{TypeResult, Typer};
 
 /// 编译期内嵌接收页（client-vanilla 的 singlefile 构建产物）。
@@ -39,11 +40,15 @@ pub fn sizes() -> (usize, usize) {
 }
 
 /// 逐字符把引导包打进当前焦点窗口（远程记事本）。
+///
+/// `standby` 是待命门闩（GUI 任务注入；CLI 传 `None`）：逐键发送期间会校验焦点，
+/// 焦点换了窗口就自动重新待命，用户确认后从断点继续。
 /// `on_progress(sent, total)` 在每个字符发送后触发。
 pub fn type_bootstrap(
     cfg: &Config,
     cancel: &CancellationToken,
     settle: bool,
+    standby: Option<Arc<StandbyGate>>,
     mut on_progress: impl FnMut(usize, usize),
 ) -> TypeResult {
     if settle && !Typer::wait_settle(cfg, cancel) {
@@ -54,7 +59,9 @@ pub fn type_bootstrap(
         Ok(t) => t,
         Err(e) => return TypeResult::Failed(0, e),
     };
-    std::thread::sleep(Duration::from_secs(3));
+    if let Some(gate) = standby {
+        typer.attach_standby(gate);
+    }
     typer.type_str(&html, &mut on_progress)
 }
 

@@ -10,6 +10,7 @@ mod commands;
 mod config;
 mod console_panel;
 mod deploy;
+mod focus;
 mod hotkey;
 mod keymap;
 mod notify;
@@ -60,7 +61,7 @@ pub enum Command {
 
 /// CLI 里运行脚本:用终端宿主(`CliScriptHost`)驱动同一套引擎与能力集。
 ///
-/// 与 GUI 的唯一区别就是宿主实现:这里 `$.typeStr` 写终端、`$.confirm` 读 stdin。
+/// 与 GUI 的唯一区别就是宿主实现:这里 `$.type_str` 写终端、`$.confirm` 读 stdin。
 fn run_cli_script(path: &std::path::Path, raw: bool, token: &cancel::CancellationToken) {
     // 首次运行顺带把内置示例落到脚本目录,方便用户照抄
     match clipbeam_scripting::scripts::ensure_seed_scripts() {
@@ -196,7 +197,8 @@ pub fn run_cli(cmd: Command) {
     match cmd {
         Command::SendOnce => {
             eprintln!("请确认焦点已在远程接收页,0.2 秒后开始发送(Ctrl-C 可强杀进程)……");
-            match send::run_once(&cfg, false, &token, true, |_, _| {}) {
+            // CLI 没有待命窗口：焦点校验交给「用户自己确认焦点」，传 None
+            match send::run_once(&cfg, false, &token, true, None, |_, _| {}) {
                 send::SendReport::Done {
                     frame_chars,
                     text_bytes,
@@ -240,7 +242,8 @@ pub fn run_cli(cmd: Command) {
                 "请在远程打开记事本并聚焦,{:.1} 秒后开始敲入自解压接收页(共 {chars} 字符,约 {secs:.0} 秒,内嵌页面 {page_bytes} 字节)。Ctrl-C 可强杀。",
                 cfg.settle_ms as f64 / 1000.0
             );
-            match deploy::type_bootstrap(&cfg, &token, true, |_, _| {}) {
+            // CLI 没有待命窗口：同上，传 None
+            match deploy::type_bootstrap(&cfg, &token, true, None, |_, _| {}) {
                 typer::TypeResult::Completed(n) => {
                     eprintln!("✓ 引导包输入完成({n} 字符)。请在远程把记事本内容另存为 clipbeam.html(编码 UTF-8),双击打开即可。")
                 }
@@ -403,6 +406,7 @@ pub fn run() {
             commands::start_deploy_type,
             commands::deploy_copy,
             commands::cancel_task,
+            commands::set_standby_paused,
             commands::get_task_status,
             commands::capture_hotkey,
             commands::get_autostart,

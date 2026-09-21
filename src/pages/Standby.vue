@@ -9,6 +9,10 @@ const kind = ref<'send' | 'recv' | 'deploytype' | 'script' | null>(null)
 const hotkey = ref('')
 const countdown = ref(10)
 const cancelled = ref(false)
+/** 脚本用 `$.request_focus("提示")` 带来的自定义提示语；空 = 用默认文案。 */
+const hint = ref<string | null>(null)
+/** 暂停失焦检测：用户需要好几次切换焦点时用（后端会同时冻结倒计时）。 */
+const paused = ref(false)
 let countdownTimer: number | null = null
 
 const unlistens: (() => void)[] = []
@@ -30,9 +34,12 @@ onMounted(async () => {
   if (win.label !== 'standby')
     return
 
-  unlistens.push(await listen<{ kind: 'send' | 'recv' | 'deploytype' | 'script', hotkey: string }>('standby-config', (e) => {
+  unlistens.push(await listen<{ kind: 'send' | 'recv' | 'deploytype' | 'script', hotkey: string, hint?: string | null }>('standby-config', (e) => {
     kind.value = e.payload.kind
     hotkey.value = e.payload.hotkey
+    hint.value = e.payload.hint ?? null
+    // 每一轮待命都从「未暂停」开始（后端 arm 时同样会复位）
+    paused.value = false
     countdown.value = 10
     cancelled.value = false
     startCountdown()
@@ -71,6 +78,32 @@ async function manualCancel() {
   await invoke('cancel_task')
 }
 
+/**
+ * 暂停 / 恢复失焦检测。
+ *
+ * 暂停只抑制「失焦 = 已确认」这一个信号并冻结倒计时；取消与热键照常可用。
+ * 恢复时倒计时重新给满 —— 用户是点我们这个按钮恢复的，所以焦点此刻在待命窗口上，
+ * 还需要再点一次目标窗口才会确认（回到原来的逻辑）。
+ *
+ * 命令返回的是**生效后的「是否暂停」**；若状态没变（例如这一轮待命已经结束），
+ * 就什么都不做，免得把倒计时搅乱。
+ */
+async function togglePause() {
+  const { invoke } = await import('@tauri-apps/api/core')
+  const effective = await invoke<boolean>('set_standby_paused', { paused: !paused.value })
+  if (effective === paused.value)
+    return
+
+  paused.value = effective
+  if (effective) {
+    stopCountdown()
+  }
+  else {
+    countdown.value = 10
+    startCountdown()
+  }
+}
+
 onUnmounted(() => {
   unlistens.forEach(fn => fn())
   stopCountdown()
@@ -88,17 +121,25 @@ onUnmounted(() => {
         {{ kindLabel }}
       </h2>
       <p class="mt-0.5 text-xs text-muted-foreground">
-        请点击目标远程窗口开始
+        {{ hint ?? '请点击目标远程窗口开始' }}
       </p>
       <p v-if="hotkey" class="mt-0.5 text-[10px] text-muted-foreground">
         触发热键: {{ hotkey }}
       </p>
-      <div class="mt-2 text-xl font-bold text-primary">
+      <div v-if="!paused" class="mt-2 text-xl font-bold text-primary">
         {{ countdown }}s
       </div>
-      <Button variant="ghost" size="sm" class="mt-2 h-7 text-xs" @click="manualCancel">
-        取消
-      </Button>
+      <p v-else class="mt-2 text-xs font-medium text-primary">
+        已暂停检测：准备好后点「恢复检测」
+      </p>
+      <div class="mt-2 flex items-center justify-center gap-1">
+        <Button variant="ghost" size="sm" class="h-7 text-xs" @click="togglePause">
+          {{ paused ? '恢复检测' : '暂停检测' }}
+        </Button>
+        <Button variant="ghost" size="sm" class="h-7 text-xs" @click="manualCancel">
+          取消
+        </Button>
+      </div>
     </div>
 
     <div v-else>

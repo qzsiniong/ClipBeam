@@ -94,6 +94,7 @@ mod tests {
             "write_text",
             "type_str",
             "confirm",
+            "request_focus",
         ] {
             assert!(
                 names.iter().any(|name| name == expected),

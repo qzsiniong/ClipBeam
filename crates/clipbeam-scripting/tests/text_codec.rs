@@ -226,6 +226,6 @@ fn extensions_are_opt_in() {
         runtime_options(Arc::new(NoopHost), console)
             .extensions
             .len(),
-        14
+        15
     );
 }
