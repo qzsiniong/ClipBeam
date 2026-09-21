@@ -1184,55 +1184,58 @@ fn capabilities_are_all_declared_in_spec() {
 ///
 /// 只做最简单的文本解析（与引擎的 tests/spec_sync.rs 同一套规则）：声明文件是我们
 /// 自己写的，格式受控。要求行首是标识符字符，因此注释行（`//`、`*`、`/**`）不会被算进来。
+///
+/// **这里不能做字节偏移运算**：`.d.ts` 是 `include_str!` 进来的，而 Windows 上
+/// `core.autocrlf` 会把工作区里的文件变成 CRLF；按 `line.len() + 1` 累加偏移在 CRLF 下
+/// 每行少算 1 字节，偏移整体前移，花括号深度会减到 0 以下（debug 构建直接 panic）。
+/// 所以只按行读，不碰字节下标。
 fn methods_declared_in_spec() -> Vec<String> {
     const MARKER: &str = "interface ClipBeam {";
     let source = include_str!("../src/spec/clipbeam.d.ts");
 
-    let open = source
-        .lines()
-        .scan(0usize, |offset, line| {
-            let start = *offset;
-            *offset += line.len() + 1;
-            Some((start, line))
-        })
-        .find(|(_, line)| line.starts_with(MARKER))
-        .map(|(start, _)| start + MARKER.len() - 1)
-        .expect("clipbeam.d.ts 里应当有行首的 `interface ClipBeam {` 声明");
-
+    let mut methods = Vec::new();
+    let mut inside = false;
     let mut depth = 0usize;
-    let mut end = None;
-    for (offset, ch) in source[open..].char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = Some(open + offset);
-                    break;
+
+    for line in source.lines() {
+        if !inside {
+            if line.starts_with(MARKER) {
+                inside = true;
+                depth = 1; // MARKER 末尾那个 `{`
+            }
+            continue;
+        }
+
+        // 方法名：行首是标识符字符且带 `(`（注释行以 `/` 或 `*` 开头，自然被排除）
+        let trimmed = line.trim();
+        if trimmed.starts_with(|ch: char| ch.is_ascii_alphabetic() || ch == '_' || ch == '$') {
+            if let Some(paren) = trimmed.find('(') {
+                let name: String = trimmed[..paren]
+                    .chars()
+                    .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '$')
+                    .collect();
+                if !name.is_empty() {
+                    methods.push(name);
                 }
             }
-            _ => {}
         }
-    }
-    let end = end.expect("`interface ClipBeam {` 花括号应当闭合");
 
-    let mut methods = Vec::new();
-    for line in source[open + 1..end].lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with(|ch: char| ch.is_ascii_alphabetic() || ch == '_' || ch == '$') {
-            continue;
-        }
-        let Some(paren) = trimmed.find('(') else {
-            continue;
-        };
-        let name: String = trimmed[..paren]
-            .chars()
-            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '$')
-            .collect();
-        if !name.is_empty() {
-            methods.push(name);
+        // 花括号深度：`interface` 块收尾的那个 `}` 之后就不再看了
+        depth += line.matches('{').count();
+        depth = depth.saturating_sub(line.matches('}').count());
+        if depth == 0 {
+            break;
         }
     }
+
+    assert!(
+        inside,
+        "clipbeam.d.ts 里应当有行首的 `interface ClipBeam {{` 声明"
+    );
+    assert!(
+        depth == 0,
+        "`interface ClipBeam {{` 花括号应当闭合（读到文件尾仍未闭合）"
+    );
     methods
 }
 

@@ -1,0 +1,8 @@
+# 统一按 LF 检出（Windows 上 Git for Windows 默认 core.autocrlf=true，会把文本文件变成 CRLF）。
+#
+# 为什么需要：仓库里很多地方直接按内容读文本 —— Rust 侧 include_str!（种子脚本、prelude.js、
+# spec/*.d.ts、接收页产物）与前端 ?raw 导入。CRLF 会让按行/按内容比较的测试挂掉
+# （曾让 crates/clipbeam-scripting/tests/capabilities.rs 的花括号扫描越界 panic）。
+#
+# text=auto 让 git 自行判断二进制文件（图标等），它们不会被转换。
+* text=auto eol=lf
