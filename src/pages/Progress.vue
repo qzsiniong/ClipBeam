@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { UnlistenFn } from '@tauri-apps/api/event'
-import { LogicalPosition } from '@tauri-apps/api/dpi'
 import { listen } from '@tauri-apps/api/event'
-import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { X } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 interface ProgressPayload {
@@ -20,16 +20,21 @@ interface TaskOutcome {
   body: string
 }
 
+/** 任务结束后、用户没碰过窗口时，多久自动收起（碰过就一直留着，由 ✕ 手动关）。 */
+const AUTO_HIDE_MS = 5000
+
 const kind = ref<ProgressPayload['kind'] | null>(null)
 const got = ref(0)
 const total = ref(0)
 const startedAt = ref(0)
 const now = ref(Date.now())
 const finished = ref<TaskOutcome | null>(null)
-/** 脚本任务当前输出的片段（进度条下方展示）。 */
+/** 脚本任务当前输出的片段（第二行右侧展示）。 */
 const snippet = ref('')
 const cancelled = ref(false)
 const isBusy = ref(false)
+/** 用户点过/拖过这个窗口 = 关心这次结果 → 结束之后不再自动收起。 */
+const userInteracted = ref(false)
 
 const unlistens: UnlistenFn[] = []
 let tickTimer: number | null = null
@@ -51,12 +56,15 @@ function stopTick() {
 }
 
 function scheduleHide() {
+  // 任务结束后如果用户碰过窗口（关心结果），就不自动关 —— 让他自己点 ✕
+  if (userInteracted.value)
+    return
   if (hideTimer !== null)
     clearTimeout(hideTimer)
   hideTimer = window.setTimeout(async () => {
     stopTick()
     await getCurrentWindow().hide()
-  }, 5000)
+  }, AUTO_HIDE_MS)
 }
 
 function clearHide() {
@@ -66,18 +74,42 @@ function clearHide() {
   }
 }
 
-async function positionWindowRight() {
-  const appWindow = getCurrentWindow()
-  const monitor = await currentMonitor()
-  if (monitor) {
-    const scaleFactor = monitor.scaleFactor
-    const screenLogicalWidth = monitor.size.width / scaleFactor
-    const physicalWinSize = await appWindow.innerSize()
-    const winLogicalWidth = physicalWinSize.width / scaleFactor
-    const x = screenLogicalWidth - winLogicalWidth - 10
-    const y = 100
-    await appWindow.setPosition(new LogicalPosition(x, y))
+/** ✕：立即收起（位置由 Rust 侧记住，下次任务还在原地弹出）。 */
+async function hideNow() {
+  clearHide()
+  stopTick()
+  await getCurrentWindow().hide()
+}
+
+/**
+ * 按住窗口任意空白处拖动（✕ 按钮除外）。
+ *
+ * 顺便把「用户碰过窗口」记下来：这是「他关心这次结果」的信号；如果此时已经排好了
+ * 自动隐藏（任务刚结束），要把它取消掉 —— 否则用户刚点完它就消失了。
+ * 浏览器 mock 下没有真实窗口，`startDragging` 会静默失败，忽略即可。
+ */
+async function onPointerDown(e: PointerEvent) {
+  markInterested()
+  const target = e.target as HTMLElement | null
+  if (target?.closest('[data-no-drag]'))
+    return
+  try {
+    await getCurrentWindow().startDragging()
   }
+  catch {
+    // dev mock / 无窗口环境下没有 startDragging，忽略
+  }
+}
+
+/**
+ * 标记「用户在关心这次结果」：任务结束后不再自动收起。
+ *
+ * 两个来源：这里的鼠标事件，以及 Rust 侧发来的 `progress-interacted`
+ * （macOS 上点击未激活窗口时鼠标事件可能被系统吞掉，只有窗口焦点是可靠的）。
+ */
+function markInterested() {
+  userInteracted.value = true
+  clearHide()
 }
 
 const titleText = computed(() => {
@@ -88,6 +120,26 @@ const titleText = computed(() => {
     script: '脚本',
   }
   return kind.value ? map[kind.value] : ''
+})
+
+const statusText = computed(() => {
+  if (isBusy.value)
+    return '进行中'
+  if (finished.value)
+    return '完成'
+  if (cancelled.value)
+    return '已中止'
+  return ''
+})
+
+const statusClass = computed(() => {
+  if (isBusy.value)
+    return 'bg-primary/10 text-primary'
+  if (finished.value)
+    return 'bg-green-500/10 text-green-600'
+  if (cancelled.value)
+    return 'bg-red-500/10 text-red-500'
+  return 'bg-muted text-muted-foreground'
 })
 
 const elapsedMs = computed(() =>
@@ -122,7 +174,6 @@ function fmtDuration(ms: number): string {
 }
 
 onMounted(async () => {
-  positionWindowRight()
   unlistens.push(
     await listen<ProgressPayload['kind']>('worker-started', (e) => {
       isBusy.value = true
@@ -133,6 +184,8 @@ onMounted(async () => {
       finished.value = null
       cancelled.value = false
       snippet.value = ''
+      // 每个任务重新数：上一个任务里「碰过窗口」不代表这次也关心
+      userInteracted.value = false
       clearHide()
       startTick()
     }),
@@ -164,6 +217,8 @@ onMounted(async () => {
       scheduleHide()
     }),
   )
+  // Rust 侧发现窗口被点/拖过（窗口获得焦点）→ 与上面的鼠标事件同一个含义
+  unlistens.push(await listen('progress-interacted', markInterested))
 })
 
 onUnmounted(() => {
@@ -174,55 +229,69 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- 悬浮条布局:紧凑单行 -->
-  <div class="flex h-screen items-center gap-3 rounded-xl bg-background px-3 shadow-lg">
-    <!-- 左:任务名 + 状态 -->
-    <div class="flex shrink-0 flex-col">
-      <span class="text-xs font-semibold">{{ titleText || '任务' }}</span>
-      <span v-if="isBusy" class="text-[10px] text-primary">进行中</span>
-      <span v-else-if="finished" class="text-[10px] text-green-600">完成</span>
-      <span v-else-if="cancelled" class="text-[10px] text-red-500">已中止</span>
+  <!-- 悬浮面板（420×96）：任务/状态；进度条；统计或结果标题；输出片段或结果说明。整块可拖，✕ 除外。 -->
+  <div
+    class="flex h-screen flex-col justify-center gap-1.5 rounded-xl bg-background px-4 select-none shadow-lg"
+    @pointerdown="onPointerDown"
+    @mouseenter="markInterested"
+  >
+    <!-- 第一行：任务名 + 状态 + 百分比 + 关闭 -->
+    <div class="flex items-center gap-2">
+      <span class="shrink-0 text-sm font-semibold">{{ titleText || '任务' }}</span>
+      <span v-if="statusText" class="shrink-0 rounded px-1.5 py-px text-[11px]" :class="statusClass">
+        {{ statusText }}
+      </span>
+      <span class="ml-auto shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
+        {{ progressPercent.toFixed(0) }}%
+      </span>
+      <button
+        data-no-drag
+        type="button"
+        class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        title="关闭"
+        @click="hideNow"
+      >
+        <X class="h-4 w-4" />
+      </button>
     </div>
 
-    <!-- 中:进度条 -->
-    <div v-if="isBusy && total > 0" class="flex flex-1 flex-col gap-1">
-      <div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-        <div
-          class="h-full bg-primary transition-all duration-700"
-          :style="{ width: `${progressPercent}%` }"
-        />
-      </div>
-      <div class="flex items-center justify-between text-[10px] text-muted-foreground">
-        <span>{{ progressPercent.toFixed(0) }}%</span>
-        <span>{{ got }}/{{ total }}{{ unitLabel }}</span>
-        <span v-if="speed > 0">{{ Math.floor(speed) }}{{ speedUnit }}</span>
-        <span v-if="remainingMs > 0">剩余{{ fmtDuration(remainingMs) }}</span>
-        <span>已用{{ fmtDuration(elapsedMs) }}</span>
-      </div>
+    <!-- 第二行：进度条 -->
+    <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+      <div
+        class="h-full bg-primary transition-all duration-700"
+        :style="{ width: `${progressPercent}%` }"
+      />
     </div>
 
-    <!-- 脚本输出片段（脚本任务才有） -->
-    <div
-      v-if="isBusy && snippet"
-      class="max-w-[160px] truncate text-[10px] text-muted-foreground"
-      :title="snippet"
-    >
-      正在输出：{{ snippet }}
+    <!-- 第三行：运行中看统计；结束后看结果标题 -->
+    <div class="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <template v-if="isBusy">
+        <span class="shrink-0 tabular-nums">{{ got }}/{{ total }}{{ unitLabel }}</span>
+        <span v-if="speed > 0" class="shrink-0 tabular-nums">{{ Math.floor(speed) }} {{ speedUnit }}</span>
+        <span v-if="remainingMs > 0" class="shrink-0 tabular-nums">剩余 {{ fmtDuration(remainingMs) }}</span>
+        <span class="shrink-0 tabular-nums">已用 {{ fmtDuration(elapsedMs) }}</span>
+      </template>
+      <span
+        v-else-if="finished"
+        class="min-w-0 flex-1 truncate font-medium text-foreground"
+        :title="finished.title"
+      >{{ finished.title }}</span>
+      <span v-else-if="cancelled" class="text-red-500">已中止</span>
+      <span v-else>初始化…</span>
     </div>
 
-    <!-- 进行中但未收到进度 -->
-    <div v-else-if="isBusy" class="flex-1 text-xs text-muted-foreground">
-      初始化…
-    </div>
-
-    <!-- 完成 -->
-    <div v-else-if="finished" class="flex-1 text-xs text-muted-foreground line-clamp-2 overflow-hidden">
-      {{ finished.body }}
-    </div>
-
-    <!-- 中止 -->
-    <div v-else-if="cancelled" class="flex-1 text-xs text-red-500">
-      已中止
+    <!-- 第四行：脚本输出片段 / 结果说明（固定高度，避免整块跳动） -->
+    <div class="h-4 min-w-0 text-[11px] text-muted-foreground">
+      <span
+        v-if="isBusy && snippet"
+        class="block truncate font-mono"
+        :title="snippet"
+      >正在输出：{{ snippet }}</span>
+      <span
+        v-else-if="finished && finished.body"
+        class="block truncate"
+        :title="finished.body"
+      >{{ finished.body }}</span>
     </div>
   </div>
 </template>

@@ -14,6 +14,7 @@ mod focus;
 mod hotkey;
 mod keymap;
 mod notify;
+mod progress_window;
 mod protocol;
 mod receive;
 mod script_runner;

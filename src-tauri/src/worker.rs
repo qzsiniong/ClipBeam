@@ -261,14 +261,14 @@ impl WorkerState {
         standby: Option<Arc<crate::standby::StandbyGate>>,
     ) {
         let progress_display = cfg.progress_display;
-        // 显示进度窗口(如果配置 Floating 或 Both),不抢焦点
+        // 显示进度窗口(如果配置 Floating 或 Both),不抢焦点。
+        // 定位在 `progress_window::show` 里先摆好再 show（默认鼠标所在显示器右上角，
+        // 用户拖过就用他拖到的位置），避免窗口在旧位置闪一下。
         if matches!(
             progress_display,
             ProgressDisplay::Floating | ProgressDisplay::Both
         ) {
-            if let Some(w) = app.get_webview_window("progress") {
-                let _ = w.show();
-            }
+            crate::progress_window::show(&app);
         }
         // 启用托盘忙时状态
         let _ = tray::set_busy(&app, true, "状态:运行中");
