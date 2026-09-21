@@ -1,6 +1,6 @@
 [package]
 name = "script-engine"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "可嵌入的 QuickJS 脚本引擎：JS/TS 执行、标准全局与能力扩展机制（不含任何宿主/业务语义）"
 license = "MIT"

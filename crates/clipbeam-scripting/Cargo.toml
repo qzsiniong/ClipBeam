@@ -1,6 +1,6 @@
 [package]
 name = "clipbeam-scripting"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "ClipBeam 的脚本能力集：把编解码 / 摘要 / 压缩 / 文件系统 / 宿主交互以扩展形式注入 script-engine"
 license = "MIT"
