@@ -10,14 +10,14 @@ use crate::cancel::CancellationToken;
 use crate::config::{Config, ProgressDisplay};
 use crate::{deploy, notify, receive, send, tray, typer};
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager, WindowEvent};
-use tokio::sync::{oneshot, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::Mutex;
 
 /// 进度事件节流间隔(毫秒)。1s 更新一次,避免数字跳动;首帧/末帧强制 emit。
 const PROGRESS_THROTTLE_MS: u64 = 1000;
 
-/// 待命窗口超时(秒)。也被 `standby::arm_standby` 复用(脚本的惰性待命)。
+/// 待命窗口超时(秒)。`standby::arm` 用它做超时(两条待命路径共用)。
 pub const STANDBY_TIMEOUT_SECS: u64 = 10;
 
 /// 任务种类(与原 main.rs 的 TaskKind 等价)。
@@ -30,6 +30,18 @@ pub enum TaskKind {
     DeployType,
     /// 运行用户脚本(JS/TS)。输出走 Typer,确认走前端弹窗。
     Script,
+}
+
+/// 待命窗口上显示的热键文案：按任务类型取对应的键。
+///
+/// `Recv` 不经过待命窗口（截屏不注入键盘事件），取中止键即可 —— 这里不再 `unreachable!()`。
+/// 脚本的惰性待命（`standby::ensure_ready`）也调它，两条路径共用一份文案逻辑。
+pub(crate) fn standby_hotkey(cfg: &Config, kind: TaskKind) -> String {
+    match kind {
+        TaskKind::SendRaw => cfg.send_raw_hotkey.clone(),
+        TaskKind::Send => cfg.send_hotkey.clone(),
+        TaskKind::DeployType | TaskKind::Script | TaskKind::Recv => cfg.stop_hotkey.clone(),
+    }
 }
 
 /// 一次脚本任务的请求:脚本名 + 已转译的源码。
@@ -167,71 +179,40 @@ impl WorkerState {
             return Ok(());
         }
 
-        // Send/DeployType 走待命阶段:创建 oneshot channel 等 blur 信号
-        let (blur_tx, blur_rx) = oneshot::channel::<()>();
-        let blur_tx = Arc::new(std::sync::Mutex::new(Some(blur_tx)));
+        // Send/SendRaw/DeployType 走待命阶段：这些任务一定会敲键盘，所以在执行前先把焦点
+        // 交给用户 —— 待命窗口自己拿焦点，它失焦即表示用户已经把焦点移到了目标窗口。
+        // 窗口/事件/超时的编排都在 `standby::arm` 里，任务级收尾留在下面。
+        let outcome = crate::standby::arm(&app, kind, &standby_hotkey(&cfg, kind));
 
-        // 显示待命窗口并注册 blur 监听
-        if let Some(w) = app.get_webview_window("standby") {
-            let _ = w.show();
-            let _ = w.set_focus();
-            let blur_tx_clone = blur_tx.clone();
-            w.on_window_event(move |event| {
-                if let WindowEvent::Focused(false) = event {
-                    if let Some(tx) = blur_tx_clone.lock().unwrap().take() {
-                        let _ = tx.send(());
-                    }
-                }
-            });
-        }
-
-        // 发送待命配置给前端(任务类型+触发热键)
-        let hotkey_label = match kind {
-            TaskKind::SendRaw => cfg.send_raw_hotkey.clone(),
-            TaskKind::Send => cfg.send_hotkey.clone(),
-            TaskKind::DeployType => cfg.stop_hotkey.clone(),
-            // 运行脚本没有独立热键:用中止键的文案即可
-            TaskKind::Script => cfg.stop_hotkey.clone(),
-            TaskKind::Recv => unreachable!(),
-        };
-        let _ = app.emit(
-            "standby-config",
-            serde_json::json!({ "kind": kind, "hotkey": hotkey_label }),
-        );
-
-        // spawn 等待 blur 或超时
         let app_clone = app.clone();
         let script_request_for_task = script_request.clone();
         tokio::spawn(async move {
-            let timeout = tokio::time::sleep(Duration::from_secs(STANDBY_TIMEOUT_SECS));
-            tokio::pin!(timeout);
-
-            tokio::select! {
-                _ = blur_rx => {
-                    // blur 触发:用户已点击目标窗口,隐藏 standby,开始执行
-                    if let Some(w) = app_clone.get_webview_window("standby") {
-                        let _ = w.hide();
-                    }
-                    let _ = app_clone.emit("standby-start", ());
-                    Self::execute_task(
-                        app_clone, kind, cfg_for_task, tok, progress,
-                        current, config_store, started_at_clone,
-                        script_request_for_task,
-                    );
-                }
-                _ = &mut timeout => {
-                    // 超时取消
-                    if let Some(w) = app_clone.get_webview_window("standby") {
-                        let _ = w.hide();
-                    }
-                    let _ = app_clone.emit("standby-cancel", ());
+            match outcome.await {
+                Ok(crate::standby::StandbyOutcome::Ready) => Self::execute_task(
+                    app_clone,
+                    kind,
+                    cfg_for_task,
+                    tok,
+                    progress,
+                    current,
+                    config_store,
+                    started_at_clone,
+                    script_request_for_task,
+                ),
+                // 超时（或待命窗口没能弹出）：按取消收尾。此刻任务还没开始执行，
+                // 托盘也就还没被设成忙，只需清掉当前任务、广播取消、把热键恢复成空闲。
+                Ok(crate::standby::StandbyOutcome::TimedOut) | Err(_) => {
                     notify::notify("ClipBeam", "未检测到点击,任务已取消");
                     if let Ok(mut c) = current.try_lock() {
                         *c = None;
                     }
                     let _ = app_clone.emit("worker-cancelled", kind);
                     let cfg_fresh = config_store.read().map(|c| c.clone()).unwrap_or_default();
-                    if let Err(e) = crate::hotkey::set_mode(&app_clone, &cfg_fresh, crate::hotkey::HotkeyMode::Idle) {
+                    if let Err(e) = crate::hotkey::set_mode(
+                        &app_clone,
+                        &cfg_fresh,
+                        crate::hotkey::HotkeyMode::Idle,
+                    ) {
                         log::error!("恢复空闲热键失败: {e}");
                     }
                 }

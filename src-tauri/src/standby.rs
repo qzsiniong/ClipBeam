@@ -1,13 +1,23 @@
-//! 惰性待命：**只在真的要把内容打进目标窗口之前**，请用户先点一下目标窗口。
+//! 惰性待命：**只在真的要把内容打进目标窗口之前**，请用户先把焦点移到目标窗口。
 //!
 //! # 为什么是惰性
 //!
 //! 待命窗口存在的意义是「别把键盘事件打进错误的窗口」。脚本不一定输出：
 //! 只读文件、算摘要、压缩分片的脚本完全用不到键盘，却没必要被一个倒计时窗口拦住。
+//! 因此脚本路径的触发点只有一处：`$.typeStr` 的实现里调 [`StandbyGate::ensure_ready`]，
+//! 在**首次**输出前弹出待命窗口并阻塞等待 —— 纯计算脚本不会被待命窗口打扰。
 //!
-//! 因此触发点只有一处：`$.typeStr` 的实现里调 [`StandbyGate::ensure_ready`]，
-//! 在**首次**输出前弹出待命窗口并阻塞等待。`worker.rs` 不做任何提前弹窗 ——
-//! 脚本立刻开始执行，只有真的要敲键盘时才打断用户。
+//! `worker.rs` 的 Send/SendRaw/DeployType 一定会敲键盘，所以在任务启动时就 arm（急切）。
+//!
+//! # 焦点交接（待命窗口为什么必须自己拿焦点）
+//!
+//! 待命的语义是「在注入键盘事件之前，让用户把焦点移到目标窗口（输入框）」。
+//! 所以 [`arm`] 一定会 `show()` + `set_focus()`：只有待命窗口自己持有焦点，
+//! 「失焦」才等价于「用户已经把焦点交给了目标窗口」。反过来，一个可见但没有焦点的待命窗口
+//! 是没意义的 —— 它永远等不到那次失焦，用户会一直卡在倒计时里。
+//!
+//! 两条路径（worker 的急切待命 / 脚本的惰性待命）**收尾方式不同**，所以 [`arm`] 只管
+//! 窗口与事件，收尾由调用方拿到 [`StandbyOutcome`] 后自己决定。
 //!
 //! 门闩**一旦放行就保持放行**：同一次脚本运行里后续的 `typeStr` 不再重复提示。
 
@@ -15,7 +25,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use clipbeam_scripting::HostError;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 use crate::cancel::CancellationToken as WorkerCancel;
 
@@ -54,7 +64,7 @@ impl StandbyGate {
         signal.notify_all();
     }
 
-    /// 等待放行，**不负责弹出待命窗口**（弹窗由 [`arm_standby`] 负责）。
+    /// 等待放行，**不负责弹出待命窗口**（弹窗由 [`arm`] 负责）。
     ///
     /// 返回 `Ok(())` 表示可以输出；`Err(HostError::Cancelled)` 表示用户在等待期间中止了任务。
     /// 已放行时立即返回（这就是「后续 `typeStr` 不再提示」的实现）。
@@ -83,8 +93,9 @@ impl StandbyGate {
 
     /// `$.typeStr` 用：确保门闩已放行（需要时先弹出待命窗口再等）。
     ///
-    /// 这是待命窗口**唯一**的触发点：只有脚本真的要注入键盘事件时才会打扰用户。
-    /// `on_cancel` 见 [`arm_standby`]。
+    /// 这是待命窗口在脚本路径上的**唯一**触发点：只有脚本真的要注入键盘事件时才打扰用户。
+    /// 放行 / 超时由 [`arm`] 的结果驱动：放行就开闩；超时（或待命窗口没能弹出）先取消令牌
+    /// 让阻塞中的 `typeStr` 退出，再跑调用方的 `on_cancel` 收尾。
     pub fn ensure_ready(
         self: &Arc<Self>,
         app: &AppHandle,
@@ -94,91 +105,110 @@ impl StandbyGate {
         if self.is_ready() {
             return Ok(());
         }
-        arm_standby(app, self, cancel, on_cancel);
+
+        // 复用的是跟随 kind 的那份文案逻辑（脚本用中止键），避免两处各写一份
+        let cfg = app
+            .state::<crate::worker::WorkerState>()
+            .config
+            .read()
+            .map(|cfg| cfg.clone())
+            .unwrap_or_default();
+        let kind = crate::worker::TaskKind::Script;
+        let outcome = arm(app, kind, &crate::worker::standby_hotkey(&cfg, kind));
+
+        let gate = self.clone();
+        let cancel_for_task = cancel.clone();
+        tokio::spawn(async move {
+            match outcome.await {
+                Ok(StandbyOutcome::Ready) => gate.mark_ready(),
+                Ok(StandbyOutcome::TimedOut) | Err(_) => {
+                    // 先让脚本侧的中止检查与阻塞中的 typeStr 退出，再做调用方的收尾
+                    cancel_for_task.cancel();
+                    on_cancel();
+                }
+            }
+        });
+
         self.wait_ready(cancel)
     }
 }
 
-/// 弹出待命窗口并等待「用户点了目标窗口」或超时。
+/// 待命阶段的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandbyOutcome {
+    /// 待命窗口失焦 = 用户把焦点移到了目标窗口 → 可以开始注入键盘事件。
+    Ready,
+    /// 到点仍没等到失焦 → 按取消处理（收尾由调用方决定）。
+    TimedOut,
+}
+
+/// 弹出待命窗口，并把「失焦 / 超时」变成一次性结果。
 ///
-/// 窗口已显示时不会重复弹（幂等），因此 `worker.rs` 的提前弹窗与
-/// [`StandbyGate::ensure_ready`] 的兜底弹窗可以安全地同时存在。
+/// 待命窗口的作用是**在注入键盘之前把焦点交给用户选定的目标窗口**，所以这里一定会
+/// `show()` + `set_focus()`：待命窗口自己拿着焦点，"失焦"才等价于"用户已经切到目标窗口"。
 ///
-/// 超时时**不在这里**做任务级收尾：调用方通过 `on_cancel` 自己决定（脚本路径的收尾是
-/// 「取消令牌 + 提示用户」，随后由正常的任务结束流程统一处理热键/tray/current）。
-pub fn arm_standby(
+/// 只负责**窗口与事件**：显示、发 `standby-config`、注册失焦监听、10 秒定时、隐藏窗口、
+/// 发 `standby-start` / `standby-cancel`。任务级收尾（取消令牌 / 通知 / 托盘 / 热键 /
+/// `worker-cancelled`）由调用方拿到结果后自己决定。
+///
+/// 待命窗口缺失（极少见）时**立即放行**：不因为弹不出窗口就把任务卡死。
+pub fn arm(
     app: &AppHandle,
-    gate: &Arc<StandbyGate>,
-    cancel: &WorkerCancel,
-    on_cancel: crate::scripting::CancelHook,
-) {
-    use tauri::{Emitter, Manager, WindowEvent};
-
-    if gate.is_ready() {
-        return;
-    }
-
-    let kind = crate::worker::TaskKind::Script;
+    kind: crate::worker::TaskKind,
+    hotkey: &str,
+) -> tokio::sync::oneshot::Receiver<StandbyOutcome> {
     let (blur_tx, blur_rx) = tokio::sync::oneshot::channel::<()>();
-    let blur_tx = Arc::new(std::sync::Mutex::new(Some(blur_tx)));
+    let blur_tx = Arc::new(Mutex::new(Some(blur_tx)));
 
     if let Some(window) = app.get_webview_window("standby") {
-        if !window.is_visible().unwrap_or(false) {
-            let _ = window.show();
-            let _ = window.set_focus();
+        let _ = window.show();
+        let _ = window.set_focus();
+        // 只发给待命窗口本身：`emit` 会广播给所有窗口，而各窗口跑的是同一套 Vue 应用，
+        // 广播可能让别的窗口也收到本不属于它的事件（见 lib.rs 里 tray-menu 的同类修复）。
+        let _ = app.emit_to(
+            "standby",
+            "standby-config",
+            serde_json::json!({ "kind": kind, "hotkey": hotkey }),
+        );
 
-            let hotkey = app
-                .state::<crate::worker::WorkerState>()
-                .config
-                .read()
-                .map(|cfg| cfg.stop_hotkey.clone())
-                .unwrap_or_else(|_| "Esc".to_string());
-            // 只发给待命窗口本身：`emit` 会广播给所有窗口，而各窗口跑的是同一套 Vue 应用，
-            // 广播可能让别的窗口也收到本不属于它的事件（见 lib.rs 里 tray-menu 的同类修复）。
-            let _ = app.emit_to(
-                "standby",
-                "standby-config",
-                serde_json::json!({ "kind": kind, "hotkey": hotkey }),
-            );
-
-            let blur_tx_clone = blur_tx.clone();
-            window.on_window_event(move |event| {
-                if let WindowEvent::Focused(false) = event {
-                    if let Some(tx) = blur_tx_clone.lock().unwrap().take() {
-                        let _ = tx.send(());
-                    }
+        window.on_window_event(move |event| {
+            if let WindowEvent::Focused(false) = event {
+                if let Some(tx) = blur_tx.lock().unwrap().take() {
+                    let _ = tx.send(());
                 }
-            });
-        }
+            }
+        });
     }
 
+    let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
     let app = app.clone();
-    let gate = gate.clone();
-    let cancel = cancel.clone();
     tokio::spawn(async move {
         let timeout = tokio::time::sleep(Duration::from_secs(crate::worker::STANDBY_TIMEOUT_SECS));
         tokio::pin!(timeout);
 
-        tokio::select! {
-            _ = blur_rx => {
-                // 用户点了目标窗口：收起提示、放行
-                if let Some(window) = app.get_webview_window("standby") {
-                    let _ = window.hide();
-                }
-                let _ = app.emit("standby-start", ());
-                gate.mark_ready();
-            }
-            _ = &mut timeout => {
-                if let Some(window) = app.get_webview_window("standby") {
-                    let _ = window.hide();
-                }
-                let _ = app.emit("standby-cancel", ());
-                // 先让脚本侧的中止检查与阻塞中的 typeStr 退出，再做调用方的收尾
-                cancel.cancel();
-                on_cancel();
-            }
+        let outcome = tokio::select! {
+            // 待命窗口不存在时没人持有发送端，这个分支会立刻以 Err 完成 —— 同「没弹出来」，
+            // 直接放行（见上面的 fail-open 说明）。
+            _ = blur_rx => StandbyOutcome::Ready,
+            _ = &mut timeout => StandbyOutcome::TimedOut,
+        };
+
+        if let Some(window) = app.get_webview_window("standby") {
+            let _ = window.hide();
         }
+        // 同样只发给待命窗口：这两个事件只用于收起/提示它自己
+        let _ = app.emit_to(
+            "standby",
+            match outcome {
+                StandbyOutcome::Ready => "standby-start",
+                StandbyOutcome::TimedOut => "standby-cancel",
+            },
+            (),
+        );
+        let _ = outcome_tx.send(outcome);
     });
+
+    outcome_rx
 }
 
 #[cfg(test)]
