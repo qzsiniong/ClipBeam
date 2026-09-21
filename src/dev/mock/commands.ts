@@ -149,6 +149,10 @@ function pluginDefault(cmd: string, payload: InvokeArgs | undefined): unknown {
   }
   if (cmd.startsWith('plugin:dialog|'))
     return cmd === 'plugin:dialog|ask' ? false : null
+  // 侧边栏用 Tauri 的 getVersion() 显示版本；浏览器里读不到 tauri.conf，
+  // 回一个**明确标注是 mock** 的串，免得看起来像真实版本号
+  if (cmd === 'plugin:app|version')
+    return '0.1.0-mock'
   if (cmd.startsWith('plugin:')) {
     console.warn('[clipbeam-mock] 未模拟的插件命令：', cmd, payload)
     return null

@@ -5,9 +5,10 @@
   底部的「总览 / 设置」跳回主窗口（脚本窗口是独立窗口，不能靠路由切过去）。
 -->
 <script setup lang="ts">
+import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
 import { FilePlus2, LayoutDashboard, Settings as SettingsIcon, Trash2 } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,17 @@ const emit = defineEmits<{
 
 const newName = ref('')
 
+/** 应用版本：真源是 `tauri.conf.json`，运行时用 `getVersion()` 读，界面里不硬编码。 */
+const version = ref('')
+onMounted(async () => {
+  try {
+    version.value = await getVersion()
+  }
+  catch {
+    // 浏览器 mock / 非 Tauri 环境拿不到版本，留空即可
+  }
+})
+
 function create() {
   const name = newName.value.trim()
   if (!name)
@@ -55,7 +67,7 @@ async function openMain() {
       </div>
       <div class="flex flex-col">
         <span class="text-sm font-semibold">ClipBeam 脚本</span>
-        <span class="text-xs text-muted-foreground">v0.1.0</span>
+        <span v-if="version" class="text-xs text-muted-foreground">v{{ version }}</span>
       </div>
     </div>
 

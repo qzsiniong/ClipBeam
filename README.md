@@ -586,6 +586,32 @@ ad-hoc 代码签名 → LaunchServices 注册。之后在 Finder 双击或 `open
 > 首次启动需在「系统设置 → 隐私与安全性」授予辅助功能、屏幕录制、通知权限；
 > ad-hoc 签名的应用与之前裸二进制是不同身份，权限需要重新授权一次。
 
+### 发布新版（改版本号 + 打 tag）
+
+版本号的**真源是 `src-tauri/tauri.conf.json`**（安装包版本就是它，`release` 工作流也用它
+校验 tag）；侧边栏显示的版本由 Tauri 的 `getVersion()` 在运行时读取，所以界面里不用改。
+一条命令搞定改版本号与后续动作：
+
+```bash
+scripts/release.sh patch                 # 0.1.0 → 0.1.1：改版本号 + 跑本地门禁，然后交互问要不要提交/打 tag/推送
+scripts/release.sh 0.2.0                 # 指定版本（也接受 0.2.0-beta.1 这类预发布串）
+scripts/release.sh minor --dry-run       # 只打印将要改什么，不写文件
+scripts/release.sh 0.2.0 --commit --tag --push   # 全自动（会触发 CI 与发版流程）
+```
+
+脚本会改这些地方：`src-tauri/tauri.conf.json`、`package.json`、`src-tauri/Cargo.toml`、
+`crates/{script-engine,clipbeam-scripting}/Cargo.toml`，再跑一次 `cargo check` 让
+`Cargo.lock` 跟上；随后默认执行与 CI 相同的一套门禁（`fmt` / `clippy -D warnings` /
+`cargo test --workspace` / `pnpm lint` / `typecheck:scripts` / `test:editor` / `build`，
+用 `--no-check` 可跳过）。工作区不干净、版本号不合法、tag 已存在（本地或远端）都会直接拒绝。
+
+推 tag 之后 `Release` 工作流自动跑：`ci`（三平台测试）→ `verify`（tag 必须等于
+`tauri.conf.json` 的 version）→ `build`（macOS universal `.dmg` + Windows NSIS
+`-setup.exe`），并创建一个**草稿** Release —— 到 Releases 页面检查产物后点 Publish 才对外发布。
+想先试跑流水线而不发版：Actions 页面手动 **Run workflow**（只打包出 artifact）。
+预发布（例如 `0.2.0-beta.1`）还要把 `.github/workflows/release.yml` 里的
+`prerelease: false` 改成 `true`。
+
 平台依赖：
 
 - **macOS**：Xcode Command Line Tools；键盘模拟走 CoreGraphics

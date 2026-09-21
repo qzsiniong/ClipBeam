@@ -6,7 +6,7 @@ use crate::hotkey::HotkeyMods;
 use crate::script_runner;
 use crate::worker::{Status, TaskKind, WorkerState};
 use clipbeam_scripting::scripts::ScriptMeta;
-use tauri::{AppHandle, Emitter, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, State};
 
 /// 读取当前配置。
 #[tauri::command]

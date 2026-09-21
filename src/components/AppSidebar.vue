@@ -5,9 +5,10 @@
   **打开独立的脚本窗口**（脚本页不在主窗口内渲染）。
 -->
 <script setup lang="ts">
+import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
 import { Github } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppNav from '@/components/AppNav.vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
@@ -17,6 +18,17 @@ const route = useRoute()
 const router = useRouter()
 
 const currentPath = computed(() => route.path)
+
+/** 应用版本：真源是 `tauri.conf.json`，运行时用 `getVersion()` 读，界面里不硬编码。 */
+const version = ref('')
+onMounted(async () => {
+  try {
+    version.value = await getVersion()
+  }
+  catch {
+    // 浏览器 mock / 非 Tauri 环境拿不到版本，留空即可
+  }
+})
 
 async function navigate(path: string) {
   if (path === '/scripts') {
@@ -37,7 +49,7 @@ async function navigate(path: string) {
       </div>
       <div class="flex flex-col">
         <span class="text-sm font-semibold">ClipBeam</span>
-        <span class="text-xs text-muted-foreground">v0.1.0</span>
+        <span v-if="version" class="text-xs text-muted-foreground">v{{ version }}</span>
       </div>
     </div>
 
