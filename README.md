@@ -614,6 +614,41 @@ pnpm lint
 > 命名空间的配置与校验（默认不挂、不可写绑定、冻结对象、非法名字/冲突名报错）由
 > `cargo test -p script-engine --test namespace` 覆盖。
 
+### 在浏览器里调试前端（Chrome）
+
+Tauri 的 webview 才会注入 `window.__TAURI_INTERNALS__`，所以直接开 Vite 会白屏 ——
+`src/App.vue` 在 setup 里读窗口 label，拿不到就 `TypeError`。现在 dev 模式下会自动装一层
+**Tauri mock**（`src/dev/tauri-mock.ts`，用官方 `@tauri-apps/api/mocks`）：
+
+```bash
+pnpm dev
+# 然后 Chrome 打开其中之一（路由是 hash 模式，与 Tauri 窗口 URL 一致）
+http://localhost:5173/            # 主窗口（总览）
+http://localhost:5173/#/scripting # 脚本窗口
+http://localhost:5173/#/settings  # 设置
+http://localhost:5173/#/progress  # 进度（裸布局）
+http://localhost:5173/#/standby   # 待命（裸布局）
+```
+
+* 窗口 label 默认按路由推断，也可以用 `?window=<main|scripting|progress|standby>` 显式指定；
+* 25 条自定义命令走内存夹具（脚本清单/读写、配置、能力清单、Console 缓冲…），
+  `start_script` 还会模拟一次运行（推 `worker-*` 事件 + Console 行）；
+* `plugin:window|*` 返回合理默认，`plugin:dialog|ask` 一律按"用户取消"返回 `false`；
+* 后端事件不会自己发生，用 `window.__CLIPBEAM_DEV__` 手动造：
+
+```js
+__CLIPBEAM_DEV__.emit('worker-started', 'send')       // 状态徽标变成"发送"
+__CLIPBEAM_DEV__.consoleLine('error', '手造一行错误')  // Console 面板立刻出现红行
+await __CLIPBEAM_DEV__.runScript('01-quick-start.js') // 演练一次完整运行
+```
+
+> **不覆盖**：真实键盘注入、剪贴板、文件系统、Rust worker 与二维码识别、系统原生弹框 ——
+> 这些仍然要真机验证。mock 有 `import.meta.env.DEV` + `__TAURI_INTERNALS__` 存在性双重守卫：
+> `pnpm tauri dev` 与生产构建都不受影响（已验证生产产物里不含 mock 代码）。
+>
+> VS Code 里可以直接用 `Chrome: 前端调试（Vite + Tauri mock）` 这条 launch 配置（F5），
+> 断点能命中 `src/**`。
+
 ---
 
 ## 协议规范

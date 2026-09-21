@@ -5,6 +5,17 @@
   "version": "0.2.0",
   "configurations": [
     {
+      // 纯前端调试：Chrome 打开 Vite 的 dev server，Tauri API 由 src/dev/tauri-mock.ts 顶上。
+      // 想调哪个窗口就改 url 里的 hash（#/scripting、#/settings、#/progress、#/standby），
+      // 或用 ?window=<label> 显式指定窗口 label。
+      "type": "chrome",
+      "request": "launch",
+      "name": "Chrome: 前端调试（Vite + Tauri mock）",
+      "url": "http://localhost:5173/#/scripting",
+      "webRoot": "${workspaceFolder}/src",
+      "preLaunchTask": "ui:dev"
+    },
+    {
       "type": "lldb",
       "request": "launch",
       "name": "Tauri Development Debug",
