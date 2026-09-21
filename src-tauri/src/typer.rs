@@ -108,7 +108,7 @@ impl Typer {
                 #[cfg(not(target_os = "macos"))]
                 {
                     if !dry_run {
-                        self.enigo.key(Key::Unicode(base), Direction::Click);
+                        let _ = self.enigo.key(Key::Unicode(base), Direction::Click);
                     }
                 }
                 if shift {
