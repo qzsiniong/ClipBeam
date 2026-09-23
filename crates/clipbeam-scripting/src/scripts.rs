@@ -20,12 +20,16 @@ pub const SCRIPT_EXTENSIONS: [&str; 6] = ["js", "mjs", "cjs", "ts", "mts", "cts"
 const MAX_NAME_CHARS: usize = 128;
 
 /// 内置示例：(文件名, 内容)。
-pub const SEED_SCRIPTS: [(&str, &str); 2] = [
+pub const SEED_SCRIPTS: [(&str, &str); 3] = [
     (
         "01-quick-start.js",
         include_str!("../seed/01-quick-start.js"),
     ),
     ("02-ts-demo.ts", include_str!("../seed/02-ts-demo.ts")),
+    (
+        "03-pack-and-shard.js",
+        include_str!("../seed/03-pack-and-shard.js"),
+    ),
 ];
 
 /// 脚本目录：`<配置目录>/ClipBeam/scripts`。

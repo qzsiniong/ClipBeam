@@ -127,17 +127,23 @@ fn seed_typescript_transpiles() {
 
 /// 示例里的 JS 语法必须成立（用引擎真跑一遍最小化版本会依赖文件与宿主，
 /// 这里只做静态断言：能被 QuickJS 解析的部分我们通过 TS 转译器的解析阶段验证）。
+///
+/// 遍历**所有** `.js` 示例，而不是只挑第一个：新增示例不该绕过这道守卫。
 #[test]
 fn seed_javascript_parses_as_javascript() {
-    let (name, source) = SEED_SCRIPTS
+    let js_seeds: Vec<(&str, &str)> = SEED_SCRIPTS
         .iter()
-        .find(|(name, _)| name.ends_with(".js"))
-        .expect("应当有一个 JS 示例");
+        .filter(|(name, _)| name.ends_with(".js"))
+        .copied()
+        .collect();
+    assert!(!js_seeds.is_empty(), "应当有 JS 示例");
 
-    // 用 .ts 路径解析同一份源码：oxc 允许 JS 在 TS 下解析，能捕获语法错误
-    let js = clipbeam_scripting::ts::transpile(source, std::path::Path::new(name))
-        .expect("示例 JS 应当能解析");
-    assert!(!js.is_empty());
+    for (name, source) in js_seeds {
+        // 用 .ts 路径解析同一份源码：oxc 允许 JS 在 TS 下解析，能捕获语法错误
+        let js = clipbeam_scripting::ts::transpile(source, std::path::Path::new(name))
+            .unwrap_or_else(|err| panic!("示例 {name} 应当能解析：{err}"));
+        assert!(!js.is_empty(), "示例 {name} 的解析结果不应为空");
+    }
 }
 
 /// 直接对临时目录做读写删除（绕过系统配置目录）。

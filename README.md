@@ -381,8 +381,11 @@ Windows %APPDATA%\ClipBeam\scripts\
 Linux   ~/.config/ClipBeam/scripts/
 ```
 
-首次启动会写入两个内置示例（`01-quick-start.js`、`02-ts-demo.ts`），**已存在的文件不会被覆盖** ——
+首次启动会写入三个内置示例（`01-quick-start.js`、`02-ts-demo.ts`、`03-pack-and-shard.js`），**已存在的文件不会被覆盖** ——
 你可以放心修改示例，下次启动不会还原。GUI 里可以新建 / 编辑 / 保存 / 删除。
+其中 `03-pack-and-shard.js` 演示「压缩 → base32_lower 编码 → 分片 → 逐片以
+`cat <<'EOF' > xx.p0001` 敲进远程终端」，接收端拼接 / 校验 / 解码 / 解压用的
+`restore.sh` 也由它自己 base32 编码后先敲过去（不压缩、不分片），远端解出来即可运行。
 文件能力不受脚本目录限制，可以访问任意**绝对路径**（第一次修改某个目录里的东西时会向你确认）。
 
 ### Console 面板

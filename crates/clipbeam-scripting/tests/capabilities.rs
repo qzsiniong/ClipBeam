@@ -1188,6 +1188,207 @@ async fn typescript_seed_script_runs_end_to_end() {
     assert!(typed.contains("编码与压缩往返"), "应当输出标题：{typed}");
 }
 
+/// 从 `$.type_str` 的 transcript 里拆出 heredoc：每段形如
+/// `cat <<'EOF' > <名字>\n<正文>\nEOF\n`，返回 `(名字, 正文)`。
+///
+/// 这正是接收端 bash 脚本要做的事 —— 测试里用 Rust 重写一遍，不复用脚本侧实现。
+fn parse_heredocs(transcript: &str) -> Vec<(String, String)> {
+    const HEAD: &str = "cat <<'EOF' > ";
+
+    let mut sections = Vec::new();
+    let mut rest = transcript;
+
+    while let Some(head) = rest.find(HEAD) {
+        let after = &rest[head + HEAD.len()..];
+        let (name, body_and_tail) = after.split_once('\n').expect("heredoc 头后面应当有换行");
+        let (body, tail) = body_and_tail
+            .split_once("\nEOF\n")
+            .expect("heredoc 正文后应当有 EOF 定界符");
+        sections.push((name.to_string(), body.to_string()));
+        rest = tail;
+    }
+
+    sections
+}
+
+/// 按名字取一段 heredoc（拿不到就直接炸，错误信息里带上名字）。
+fn section<'a>(sections: &'a [(String, String)], name: &str) -> &'a (String, String) {
+    sections
+        .iter()
+        .find(|(section_name, _)| section_name == name)
+        .unwrap_or_else(|| panic!("敲出的内容里缺少 {name}"))
+}
+
+/// 从 seed 源码里取出 `restoreScript` 模板字面量的正文。
+///
+/// 正文按约定不写 `${}`、反引号、反斜杠（否则模板字面量就要转义），这里直接按标记切片，
+/// 顺手把这三条约定钉死。
+fn restore_script_literal(source: &str) -> String {
+    const BEGIN: &str = "const restoreScript = `";
+    const END: &str = "\n`\n// ↑↑↑ restore.sh 正文";
+
+    let start = source.find(BEGIN).expect("找不到 restoreScript 常量") + BEGIN.len();
+    let end = source[start..]
+        .find(END)
+        .expect("找不到 restoreScript 常量的结尾")
+        + start
+        // +1：模板字面量的值以结尾那个换行收束（远端解出来的脚本也该这么结尾）
+        + 1;
+    let literal = &source[start..end];
+
+    assert!(
+        !literal.contains('`'),
+        "正文里不能出现反引号（模板字面量会被截断）"
+    );
+    assert!(
+        !literal.contains('\\'),
+        "正文里不能出现反斜杠（模板字面量会转义）"
+    );
+    assert!(
+        !literal.contains("${"),
+        "正文里不能出现 ${{（模板字面量会插值）"
+    );
+
+    literal.to_string()
+}
+
+/// `03-pack-and-shard.js` 端到端：读文件 → gzip → base32_lower_nopad → 分片 →
+/// 逐片以 `cat <<'EOF' > xx.p0001` 敲出。
+///
+/// 断言覆盖链路两端：先看敲出去的 transcript 结构（分片名连续、正文只含 base32
+/// 小写盘表、除最后一片都满片），再用 Rust 侧独立实现把它拼回去（base32 解码 +
+/// gunzip）与源文件逐字节比对 —— 就是示例注释里那份接收端 bash 脚本的等价物。
+#[tokio::test]
+async fn pack_and_shard_seed_script_runs_end_to_end() {
+    use md5::{Digest, Md5};
+
+    let dir = temp_dir("seed-pack-and-shard");
+    let target = dir.join("sample.bin");
+
+    // 3000 字节 xorshift 流：接近不可压缩，能真的切出多片
+    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+    let payload: Vec<u8> = (0..3000)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 24) as u8
+        })
+        .collect();
+    std::fs::write(&target, &payload).unwrap();
+
+    let host = Arc::new(TestHost::with_answer(ConfirmChoice::Yes));
+    let runtime = runtime_with(host.clone()).await;
+
+    // 示例写的是 `~/clipbeam-quick-start.txt`；测试里换成临时文件（与 01 示例同一手法）
+    let source = include_str!("../seed/03-pack-and-shard.js")
+        .replace("'~/clipbeam-quick-start.txt'", &js_path(&target));
+
+    runtime
+        .run_named_script("03-pack-and-shard.js", &source)
+        .await
+        .expect("示例脚本应当跑通");
+
+    let typed = host.typed();
+    let sections = parse_heredocs(&typed);
+    assert!(sections.len() >= 3, "应当先敲还原脚本、再敲元信息与多片：{typed}");
+
+    // 还原脚本：只 base32、不压缩不分片，一个 heredoc —— 解出来必须与 seed 里的正文逐字节一致
+    let restore_body = &section(&sections, "clipbeam-restore.b32").1;
+    assert!(
+        restore_body
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c) || c == '\n'),
+        "还原脚本负载应当只有 base32 小写盘表与换行：{restore_body}"
+    );
+    let decoded_script = String::from_utf8(
+        data_encoding::BASE32_NOPAD
+            .decode(
+                restore_body
+                    .split_whitespace()
+                    .collect::<String>()
+                    .to_ascii_uppercase()
+                    .as_bytes(),
+            )
+            .expect("还原脚本 base32 解码失败"),
+    )
+    .expect("还原脚本应当是 UTF-8");
+    assert_eq!(
+        decoded_script,
+        restore_script_literal(include_str!("../seed/03-pack-and-shard.js")),
+        "敲给远端的还原脚本必须与 seed 里的正文一致"
+    );
+
+    // 元信息
+    let meta_body = &section(&sections, "clipbeam-payload.meta").1;
+    let value_of = |key: &str| -> String {
+        let needle = format!("{key}=");
+        meta_body
+            .lines()
+            .find_map(|line| line.strip_prefix(needle.as_str()))
+            .unwrap_or_else(|| panic!("元信息里缺少 {key}：{meta_body}"))
+            .to_string()
+    };
+    let parts: usize = value_of("parts").parse().expect("parts 应当是数字");
+    let chars: usize = value_of("chars").parse().expect("chars 应当是数字");
+    let b32_md5 = value_of("b32_md5");
+    let raw_bytes: usize = value_of("raw_bytes").parse().expect("raw_bytes 应当是数字");
+    let raw_md5 = value_of("raw_md5");
+
+    assert_eq!(raw_bytes, payload.len(), "元信息里的原始大小应当正确");
+    assert!(parts > 1, "测试数据应当切出多片：parts={parts}");
+
+    // 分片：名字连续、正文只含小写 base32 盘表、除最后一片都满片
+    let shards: Vec<&(String, String)> = sections
+        .iter()
+        .filter(|(name, _)| name.starts_with("clipbeam-payload.p"))
+        .collect();
+    assert_eq!(shards.len(), parts, "分片数应当与元信息一致");
+
+    let mut b32 = String::new();
+    for (index, (name, body)) in shards.iter().enumerate() {
+        assert_eq!(
+            name,
+            &format!("clipbeam-payload.p{:04}", index + 1),
+            "分片名应当从 p0001 起连续"
+        );
+        assert!(
+            body.chars()
+                .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c)),
+            "分片 {name} 只应包含 base32 小写盘表字符：{body}"
+        );
+        if index + 1 < parts {
+            assert_eq!(body.chars().count(), 1024, "除最后一片外都应当是 1024 字符");
+        }
+        b32.push_str(body);
+    }
+    assert_eq!(b32.chars().count(), chars, "base32 字符数应当与元信息一致");
+
+    // 传输层摘要：脚本的 `$.md5` 与 md-5 crate 交叉验证
+    assert_eq!(
+        hex::encode(Md5::digest(b32.as_bytes())),
+        b32_md5,
+        "base32 文本摘要应当一致"
+    );
+
+    // 接收端还原：base32 解码 → gunzip → 与源文件逐字节比对
+    let decoded = data_encoding::BASE32_NOPAD
+        .decode(b32.to_ascii_uppercase().as_bytes())
+        .expect("base32 解码失败");
+    let mut decoder = flate2::read::GzDecoder::new(decoded.as_slice());
+    let mut restored = Vec::new();
+    std::io::Read::read_to_end(&mut decoder, &mut restored).expect("gzip 解码失败");
+
+    assert_eq!(restored, payload, "还原出的字节应当与源文件一致");
+    assert_eq!(
+        hex::encode(Md5::digest(restored.as_slice())),
+        raw_md5,
+        "还原文件摘要应当与元信息一致"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `sleep` 是引擎提供的**标准全局**（必须 await），不在 `$` 上。
 #[tokio::test]
 async fn sleep_is_a_global_not_a_capability() {
