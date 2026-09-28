@@ -1219,18 +1219,25 @@ fn section<'a>(sections: &'a [(String, String)], name: &str) -> &'a (String, Str
         .unwrap_or_else(|| panic!("敲出的内容里缺少 {name}"))
 }
 
-/// 从 seed 源码里取出 `restoreScript` 模板字面量的正文。
+/// 从 seed 源码里取出 `getRestoreScript()` 返回的模板字面量正文。
 ///
 /// 正文按约定不写 `${}`、反引号、反斜杠（否则模板字面量就要转义），这里直接按标记切片，
 /// 顺手把这三条约定钉死。
+///
+/// `${` 这条连注释都算：曾经在 bash 注释里写了个长度展开的写法，TS/oxc 把它当成
+/// 真插值，模板一直延续到结尾那个反引号，于是整个脚本解析失败 —— 错误行号还会指到
+/// 末尾，很难看出是注释的锅。
 fn restore_script_literal(source: &str) -> String {
-    const BEGIN: &str = "const restoreScript = `";
-    const END: &str = "\n`\n// ↑↑↑ restore.sh 正文";
+    const BEGIN: &str = "function getRestoreScript(): string {\n\treturn `";
+    const END: &str = "\n`;\n}";
 
-    let start = source.find(BEGIN).expect("找不到 restoreScript 常量") + BEGIN.len();
+    let start = source
+        .find(BEGIN)
+        .expect("找不到 getRestoreScript 函数")
+        + BEGIN.len();
     let end = source[start..]
         .find(END)
-        .expect("找不到 restoreScript 常量的结尾")
+        .expect("找不到 getRestoreScript 模板字面量的结尾")
         + start
         // +1：模板字面量的值以结尾那个换行收束（远端解出来的脚本也该这么结尾）
         + 1;
@@ -1252,7 +1259,7 @@ fn restore_script_literal(source: &str) -> String {
     literal.to_string()
 }
 
-/// `03-pack-and-shard.js` 端到端：读文件 → gzip → base32_lower_nopad → 分片 →
+/// `03-pack-and-shard.ts` 端到端：读文件 → gzip → base32_lower_nopad → 分片 →
 /// 逐片以 `cat <<'EOF' > xx.p0001` 敲出。
 ///
 /// 断言覆盖链路两端：先看敲出去的 transcript 结构（分片名连续、正文只含 base32
@@ -1280,12 +1287,17 @@ async fn pack_and_shard_seed_script_runs_end_to_end() {
     let host = Arc::new(TestHost::with_answer(ConfirmChoice::Yes));
     let runtime = runtime_with(host.clone()).await;
 
-    // 示例写的是 `~/clipbeam-quick-start.txt`；测试里换成临时文件（与 01 示例同一手法）
-    let source = include_str!("../seed/03-pack-and-shard.js")
+    // 示例写的是 `~/clipbeam-quick-start.txt`；测试里换成临时文件（与 01 示例同一手法）。
+    // 文件已存在，所以示例的「不存在才写示例文件」分支不会覆盖这份 payload
+    let source = include_str!("../seed/03-pack-and-shard.ts")
         .replace("'~/clipbeam-quick-start.txt'", &js_path(&target));
 
+    // .ts 示例和 02-ts-demo.ts 一样先转译再跑（转译后报错行号指向生成代码）
+    let source = clipbeam_scripting::ts::transpile(&source, Path::new("03-pack-and-shard.ts"))
+        .expect("示例 TS 应当能转译");
+
     runtime
-        .run_named_script("03-pack-and-shard.js", &source)
+        .run_named_script("03-pack-and-shard.ts", &source)
         .await
         .expect("示例脚本应当跑通");
 
@@ -1293,13 +1305,17 @@ async fn pack_and_shard_seed_script_runs_end_to_end() {
     let sections = parse_heredocs(&typed);
     assert!(sections.len() >= 3, "应当先敲还原脚本、再敲元信息与多片：{typed}");
 
+    // 远端文件名一律从源文件名派生：sample.bin → sample.bin.gz.b32.p0001
+    let base = "sample.bin";
+    let packed_name = format!("{base}.gz.b32");
+
     // 还原脚本：只 base32、不压缩不分片，一个 heredoc —— 解出来必须与 seed 里的正文逐字节一致
-    let restore_body = &section(&sections, "clipbeam-restore.b32").1;
+    let restore_body = &section(&sections, "restore.sh.b32").1;
     assert!(
         restore_body
             .chars()
             .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c) || c == '\n'),
-        "还原脚本负载应当只有 base32 小写盘表与换行：{restore_body}"
+        "还原脚本负载应当只有 base32 小写盘表（无填充）与换行：{restore_body}"
     );
     let decoded_script = String::from_utf8(
         data_encoding::BASE32_NOPAD
@@ -1315,12 +1331,12 @@ async fn pack_and_shard_seed_script_runs_end_to_end() {
     .expect("还原脚本应当是 UTF-8");
     assert_eq!(
         decoded_script,
-        restore_script_literal(include_str!("../seed/03-pack-and-shard.js")),
+        restore_script_literal(include_str!("../seed/03-pack-and-shard.ts")),
         "敲给远端的还原脚本必须与 seed 里的正文一致"
     );
 
     // 元信息
-    let meta_body = &section(&sections, "clipbeam-payload.meta").1;
+    let meta_body = &section(&sections, &format!("{base}.meta")).1;
     let value_of = |key: &str| -> String {
         let needle = format!("{key}=");
         meta_body
@@ -1341,7 +1357,7 @@ async fn pack_and_shard_seed_script_runs_end_to_end() {
     // 分片：名字连续、正文只含小写 base32 盘表、除最后一片都满片
     let shards: Vec<&(String, String)> = sections
         .iter()
-        .filter(|(name, _)| name.starts_with("clipbeam-payload.p"))
+        .filter(|(name, _)| name.starts_with(&format!("{packed_name}.p")))
         .collect();
     assert_eq!(shards.len(), parts, "分片数应当与元信息一致");
 
@@ -1349,11 +1365,13 @@ async fn pack_and_shard_seed_script_runs_end_to_end() {
     for (index, (name, body)) in shards.iter().enumerate() {
         assert_eq!(
             name,
-            &format!("clipbeam-payload.p{:04}", index + 1),
+            &format!("{packed_name}.p{:04}", index + 1),
             "分片名应当从 p0001 起连续"
         );
+        // 无填充变体：任何一片（含最后一片）都不该出现 `=`
         assert!(
-            body.chars()
+            body
+                .chars()
                 .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c)),
             "分片 {name} 只应包含 base32 小写盘表字符：{body}"
         );

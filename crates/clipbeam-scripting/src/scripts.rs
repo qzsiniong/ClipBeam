@@ -27,8 +27,8 @@ pub const SEED_SCRIPTS: [(&str, &str); 3] = [
     ),
     ("02-ts-demo.ts", include_str!("../seed/02-ts-demo.ts")),
     (
-        "03-pack-and-shard.js",
-        include_str!("../seed/03-pack-and-shard.js"),
+        "03-pack-and-shard.ts",
+        include_str!("../seed/03-pack-and-shard.ts"),
     ),
 ];
 

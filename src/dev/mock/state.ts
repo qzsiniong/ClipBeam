@@ -8,7 +8,7 @@ import type { MockCapability, MockConsoleLine, MockScriptMeta } from './types'
 import { isMac } from '@/lib/clipbeam-script/shortcuts'
 import quickStart from '../../../crates/clipbeam-scripting/seed/01-quick-start.js?raw'
 import tsDemo from '../../../crates/clipbeam-scripting/seed/02-ts-demo.ts?raw'
-import packAndShard from '../../../crates/clipbeam-scripting/seed/03-pack-and-shard.js?raw'
+import packAndShard from '../../../crates/clipbeam-scripting/seed/03-pack-and-shard.ts?raw'
 
 /** 造一堆日志，用来看 Console 面板的滚动 / 过滤 / 最大化。 */
 const CONSOLE_DEMO = `// 造一堆日志：用来看 Console 面板的自动跟随、等级过滤与最大化
@@ -26,7 +26,7 @@ export const MOCK_DIR = '/mock/scripts（浏览器 mock）'
 const scripts = new Map<string, string>([
   ['01-quick-start.js', quickStart],
   ['02-ts-demo.ts', tsDemo],
-  ['03-pack-and-shard.js', packAndShard],
+  ['03-pack-and-shard.ts', packAndShard],
   ['03-console-demo.js', CONSOLE_DEMO],
 ])
 
