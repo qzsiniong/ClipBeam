@@ -71,6 +71,7 @@ const CAPABILITIES: MockCapability[] = [
   ['exists', 'exists(path: string) -> Promise<boolean>', '路径是否存在'],
   ['type_str', 'type_str(text: string, delayMs?: number) -> void', '把文本交给宿主输出'],
   ['confirm', 'confirm(message: string) -> Promise<boolean>', '向用户提问'],
+  ['pick_path', 'pick_path(prompt?: string, kind?: "file" | "dir") -> Promise<string | null>', '让用户选一个文件或文件夹'],
   ['request_focus', 'request_focus(hint?: string) -> void', '请求用户把焦点切到目标窗口（GUI 下弹出待命窗口并等待确认）'],
 ].map(([name, signature, doc]) => ({ name, signature, doc, source: 'clipbeam' }))
 

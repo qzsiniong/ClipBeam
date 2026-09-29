@@ -9,13 +9,14 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use clipbeam_scripting::{
-    capabilities, extensions, runtime_options, ConfirmChoice, FileDecision, HostError, ScriptHost,
+    capabilities, extensions, runtime_options, ConfirmChoice, FileDecision, HostError, PickKind,
+    ScriptHost,
 };
 use script_engine::{ConsoleHook, RuntimeOptions, ScriptExtension, ScriptRuntime, StdoutConsole};
 
 // ── 测试替身 ────────────────────────────────────────────────────────────────
 
-/// 记录型宿主：输出、确认、文件授权都可观测，答案由原子量控制。
+/// 记录型宿主：输出、确认、选路径、文件授权都可观测，答案由原子量控制。
 struct TestHost {
     typed: Mutex<String>,
     confirm_messages: Mutex<Vec<String>>,
@@ -23,6 +24,10 @@ struct TestHost {
     file_requests: Mutex<Vec<String>>,
     file_answer: Mutex<FileDecision>,
     focus_requests: Mutex<Vec<String>>,
+    /// `$.pick_path` 的回答；`None` 表示模拟「用户取消 / 没有界面」。
+    pick_answer: Mutex<Option<PathBuf>>,
+    /// `$.pick_path` 收到的 `(prompt, kind)`，按调用顺序。
+    pick_requests: Mutex<Vec<(String, PickKind)>>,
 }
 
 impl Default for TestHost {
@@ -35,6 +40,9 @@ impl Default for TestHost {
             // 默认放行一次：文件读写测试不该被授权逻辑挡住
             file_answer: Mutex::new(FileDecision::Allow),
             focus_requests: Mutex::new(Vec::new()),
+            // 默认「没选到」：不调用 pick_path 的测试不受影响
+            pick_answer: Mutex::new(None),
+            pick_requests: Mutex::new(Vec::new()),
         }
     }
 }
@@ -74,6 +82,15 @@ impl TestHost {
     fn focus_requests(&self) -> Vec<String> {
         self.focus_requests.lock().unwrap().clone()
     }
+
+    /// 设定 `$.pick_path` 的回答；传 `None` 模拟用户取消。
+    fn set_pick_answer(&self, path: Option<PathBuf>) {
+        *self.pick_answer.lock().unwrap() = path;
+    }
+
+    fn pick_requests(&self) -> Vec<(String, PickKind)> {
+        self.pick_requests.lock().unwrap().clone()
+    }
 }
 
 impl ScriptHost for TestHost {
@@ -110,6 +127,14 @@ impl ScriptHost for TestHost {
     fn request_focus(&self, hint: &str) -> Result<(), HostError> {
         self.focus_requests.lock().unwrap().push(hint.to_string());
         Ok(())
+    }
+
+    fn pick_path(&self, prompt: &str, kind: PickKind) -> Result<Option<PathBuf>, HostError> {
+        self.pick_requests
+            .lock()
+            .unwrap()
+            .push((prompt.to_string(), kind));
+        Ok(self.pick_answer.lock().unwrap().clone())
     }
 }
 
@@ -1078,6 +1103,9 @@ async fn cancelled_host_aborts_type_str() {
         fn confirm(&self, _message: &str) -> Result<ConfirmChoice, HostError> {
             Ok(ConfirmChoice::No)
         }
+        fn pick_path(&self, _prompt: &str, _kind: PickKind) -> Result<Option<PathBuf>, HostError> {
+            Ok(None)
+        }
         fn cancelled(&self) -> bool {
             true
         }
@@ -1129,6 +1157,69 @@ async fn interaction_without_host_reports_wiring_error() {
     assert!(
         message.contains("没有注入宿主"),
         "错误信息应当指向接线问题：{message}"
+    );
+}
+
+/// `$.pick_path`：prompt / kind 原样送达宿主，宿主的回答映射成 `string | null`。
+#[tokio::test]
+async fn pick_path_reaches_host() {
+    let host = Arc::new(TestHost::default());
+    let runtime = runtime_with(host.clone()).await;
+
+    let picked = PathBuf::from("/tmp/clipbeam-选择的文件.bin");
+    let picked_text = picked.to_string_lossy().to_string();
+    host.set_pick_answer(Some(picked.clone()));
+
+    let values: Vec<String> = runtime
+        .eval(
+            r#"
+            const file = await $.pick_path("请选择一个文件");
+            const dir = await $.pick_path("请选择一个文件夹", "dir");
+            [typeof file, file, typeof dir, dir]
+            "#,
+        )
+        .await
+        .expect("脚本执行失败");
+
+    assert_eq!(values[0], "string", "选到路径时应当是字符串");
+    assert_eq!(values[1], picked_text, "应当原样返回宿主给的路径");
+    assert_eq!(values[2], "string", "kind=dir 同样返回字符串");
+    assert_eq!(values[3], picked_text);
+
+    assert_eq!(
+        host.pick_requests(),
+        vec![
+            ("请选择一个文件".to_string(), PickKind::File),
+            ("请选择一个文件夹".to_string(), PickKind::Dir),
+        ],
+        "prompt 与 kind 应当原样送到宿主（kind 缺省是 file）"
+    );
+
+    // 宿主回答「没拿到路径」（用户取消 / 没有界面）→ null（而不是 undefined）
+    host.set_pick_answer(None);
+    let is_null: bool = runtime
+        .eval(r#"await $.pick_path("随便") === null"#)
+        .await
+        .expect("脚本执行失败");
+    assert!(is_null, "取消时应当是 null");
+
+    // kind 写错：当场报错，而不是静默按文件处理
+    let message: String = runtime
+        .eval(
+            r#"
+            try {
+              await $.pick_path("x", "files");
+              "没有抛错"
+            } catch (err) {
+              err.message
+            }
+            "#,
+        )
+        .await
+        .expect("脚本执行失败");
+    assert!(
+        message.contains("kind"),
+        "非法 kind 应当报错并说明取值：{message}"
     );
 }
 
@@ -1303,7 +1394,10 @@ async fn pack_and_shard_seed_script_runs_end_to_end() {
 
     let typed = host.typed();
     let sections = parse_heredocs(&typed);
-    assert!(sections.len() >= 3, "应当先敲还原脚本、再敲元信息与多片：{typed}");
+    assert!(
+        sections.len() >= 3,
+        "应当先敲还原脚本、再敲元信息与多片：{typed}"
+    );
 
     // 远端文件名一律从源文件名派生：sample.bin → sample.bin.gz.b32.p0001
     let base = "sample.bin";

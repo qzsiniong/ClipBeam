@@ -94,6 +94,7 @@ mod tests {
             "write_text",
             "type_str",
             "confirm",
+            "pick_path",
             "request_focus",
         ] {
             assert!(

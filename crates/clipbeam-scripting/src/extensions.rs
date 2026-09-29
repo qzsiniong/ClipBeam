@@ -202,6 +202,7 @@ pub fn extensions() -> Vec<Arc<dyn ScriptExtension>> {
         // 宿主交互
         Arc::new(interaction::TypeStrExtension),
         Arc::new(interaction::ConfirmExtension),
+        Arc::new(interaction::PickPathExtension),
         Arc::new(interaction::RequestFocusExtension),
     ]
 }

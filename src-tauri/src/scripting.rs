@@ -5,19 +5,19 @@
 //! * [`clipbeam_scripting::ScriptHost`] 是「业务宿主」接口（输出 / 询问 / 文件授权）；
 //! * [`script_engine::ConsoleHook`] 是引擎的 `console.*` 落点 —— 本文件同时实现两者：
 //!   `console.*` 进脚本窗口的 Console 面板，宿主交互走系统弹框与 [`Typer`]；
-//! * `$.type_str` 走既有的 [`Typer`]（逐键打进当前焦点窗口），`$.confirm` 与文件授权
-//!   用**系统原生**确认框（`tauri-plugin-dialog`），进度通过 `worker-progress` 事件推送；
+//! * `$.type_str` 走既有的 [`Typer`]（逐键打进当前焦点窗口），`$.confirm` / `$.pick_path`
+//!   与文件授权用**系统原生**弹框（`tauri-plugin-dialog`），进度通过 `worker-progress` 事件推送；
 //! * 「先点目标窗口再输出」由 [`crate::standby::StandbyGate`] 保证：**惰性**地在首次
 //!   `type_str` 之前弹待命窗口，纯计算脚本不会被打扰。
 //!
 //! 命令行路径（`clipbeam script`）不走这里，它用 `clipbeam_scripting::cmd::CliScriptHost`。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use clipbeam_scripting::{ConfirmChoice, FileDecision, HostError, ScriptHost};
+use clipbeam_scripting::{ConfirmChoice, FileDecision, HostError, PickKind, ScriptHost};
 use script_engine::ConsoleHook;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::{
@@ -52,6 +52,10 @@ const FILE_TITLE: &str = "ClipBeam 脚本要修改文件";
 const FILE_ALLOW: &str = "允许一次";
 const FILE_ALLOW_DIR: &str = "本次运行内该目录都允许";
 const FILE_DENY: &str = "拒绝";
+
+/// 选择框的默认标题（脚本没给 `prompt` 时）。
+const PICK_FILE_TITLE: &str = "ClipBeam 脚本：请选择文件";
+const PICK_DIR_TITLE: &str = "ClipBeam 脚本：请选择文件夹";
 
 /// GUI 侧宿主：把脚本的输出、询问、进度接到 Tauri 窗口上。
 pub struct TauriScriptHost {
@@ -125,23 +129,23 @@ impl TauriScriptHost {
         );
     }
 
-    /// 弹一个**系统原生**确认框并把结果原样返回。
+    /// 在「脚本窗口临时显形并聚焦」的状态下执行 `action`，结束后恢复原可见性。
     ///
     /// 系统弹框要应用处于激活状态才可靠地出现在最前：脚本窗口在托盘模式可能是隐藏的，
-    /// 先临时显形 + 聚焦，回答完再恢复原状态（不改变用户设定的窗口可见性）。
+    /// 先临时显形 + 聚焦，用完再恢复（不改变用户设定的窗口可见性）。确认框与选择框
+    /// 都需要这套处理，所以抽在这里。
     ///
     /// 调用方是 Worker 的阻塞线程，正是 rfd blocking API 的适用场景；**绝不能在主线程调用**。
-    fn ask_dialog(
+    fn with_scripting_window<T>(
         &self,
-        title: &str,
-        message: &str,
-        buttons: MessageDialogButtons,
-    ) -> MessageDialogResult {
+        action: impl FnOnce(Option<&tauri::WebviewWindow>) -> T,
+    ) -> T {
         let scripting_win = self.app.get_webview_window(SCRIPTING_WINDOW);
         let was_visible = scripting_win
             .as_ref()
             .and_then(|window| window.is_visible().ok())
             .unwrap_or(false);
+
         if let Some(window) = &scripting_win {
             if !was_visible {
                 let _ = window.show();
@@ -151,18 +155,7 @@ impl TauriScriptHost {
             }
         }
 
-        let mut dialog = self
-            .app
-            .dialog()
-            .message(message)
-            .title(title)
-            .kind(MessageDialogKind::Warning)
-            .buttons(buttons);
-        if let Some(window) = &scripting_win {
-            dialog = dialog.parent(window);
-        }
-
-        let result = dialog.blocking_show_with_result();
+        let result = action(scripting_win.as_ref());
 
         if let Some(window) = &scripting_win {
             if !was_visible {
@@ -172,6 +165,29 @@ impl TauriScriptHost {
         }
 
         result
+    }
+
+    /// 弹一个**系统原生**确认框并把结果原样返回。
+    fn ask_dialog(
+        &self,
+        title: &str,
+        message: &str,
+        buttons: MessageDialogButtons,
+    ) -> MessageDialogResult {
+        self.with_scripting_window(|window| {
+            let mut dialog = self
+                .app
+                .dialog()
+                .message(message)
+                .title(title)
+                .kind(MessageDialogKind::Warning)
+                .buttons(buttons);
+            if let Some(window) = window {
+                dialog = dialog.parent(window);
+            }
+
+            dialog.blocking_show_with_result()
+        })
     }
 }
 
@@ -235,6 +251,46 @@ impl ScriptHost for TauriScriptHost {
             // Cancel = 用户要求停掉脚本；Custom 只会在换用 *Custom 按钮时出现，一并按中止处理
             _ => Err(HostError::Cancelled),
         }
+    }
+
+    /// `$.pick_path`：系统原生选择框（文件 / 文件夹）。
+    ///
+    /// 与 `$.confirm` 一样跑在 Worker 的阻塞线程上，用 rfd 的 blocking API。
+    /// 用户取消返回 `Ok(None)`（脚本侧是 `null`），不算错误。
+    fn pick_path(&self, prompt: &str, kind: PickKind) -> Result<Option<PathBuf>, HostError> {
+        let picked = self.with_scripting_window(|window| {
+            let title = if prompt.trim().is_empty() {
+                match kind {
+                    PickKind::File => PICK_FILE_TITLE,
+                    PickKind::Dir => PICK_DIR_TITLE,
+                }
+            } else {
+                prompt
+            };
+
+            let mut dialog = self.app.dialog().file().set_title(title);
+            if let Some(window) = window {
+                dialog = dialog.set_parent(window);
+            }
+
+            match kind {
+                PickKind::File => dialog.blocking_pick_file(),
+                PickKind::Dir => dialog.blocking_pick_folder(),
+            }
+        });
+
+        let Some(file_path) = picked else {
+            // 用户点了取消（或关掉了选择框）
+            return Ok(None);
+        };
+
+        // Windows 上原生选择框可能给出 `\\?\C:\...` 这种前缀路径：`simplified`
+        // 去掉前缀，脚本拿到的就是日常写法（再喂给 `$.read` 也不会踩坑）
+        file_path
+            .simplified()
+            .into_path()
+            .map(Some)
+            .map_err(|err| HostError::Failed(format!("所选路径无法转换成文件路径：{err}")))
     }
 
     /// `$.request_focus`：显式要求一轮新的焦点确认，`hint` 显示在待命窗口上。

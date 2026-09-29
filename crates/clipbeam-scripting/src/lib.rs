@@ -39,7 +39,7 @@ use std::sync::Arc;
 use script_engine::{ConsoleHook, RuntimeOptions, ScriptRuntime};
 
 pub use extensions::extensions;
-pub use host::{ConfirmChoice, FileDecision, HostError, NoopHost, ScriptHost};
+pub use host::{ConfirmChoice, FileDecision, HostError, NoopHost, PickKind, ScriptHost};
 pub use script_engine::ts;
 pub use spec::{capabilities, capability_list, Capability, CapabilityList};
 
@@ -54,7 +54,8 @@ pub const NAMESPACE_ALIAS: &str = "$";
 
 /// 组装一份「带 ClipBeam 全部能力 + 指定宿主与 console 落点」的运行时配置。
 ///
-/// * `host` 决定 `$.type_str` / `$.confirm` / 文件授权问到哪儿（CLI 是终端，GUI 是窗口）；
+/// * `host` 决定 `$.type_str` / `$.confirm` / `$.pick_path` / 文件授权问到哪儿
+///   （CLI 是终端，GUI 是窗口）；
 /// * `console` 决定 `console.*` 的落点（CLI 用 [`script_engine::StdoutConsole`]，
 ///   GUI 用面板缓冲）—— 它属于引擎的 [`ConsoleHook`]，与 `host` 是两个独立的东西；
 /// * 能力命名空间挂成 [`NAMESPACE`] / [`NAMESPACE_ALIAS`]（名字只在本 crate 里写一次）。

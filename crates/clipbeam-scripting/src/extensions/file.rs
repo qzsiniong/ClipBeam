@@ -197,7 +197,10 @@ impl ScriptExtension for FileExtension {
 /// | `/x/y` | 原样（Unix 绝对路径） |
 ///
 /// 其余（相对路径）返回错误：脚本的工作目录不可预期，允许相对路径等于埋雷。
-fn resolve_path(raw: &str) -> Result<PathBuf, String> {
+///
+/// `pub(crate)`：命令行的 `$.pick_path`（终端里手输路径）复用同一套规则，
+/// 免得「脚本里的路径」和「选路径时输的路径」两套写法各认一半。
+pub(crate) fn resolve_path(raw: &str) -> Result<PathBuf, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("路径不能为空".to_string());

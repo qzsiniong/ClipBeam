@@ -268,7 +268,7 @@ for (let i = 0; i < parts.length; i++) {
 | 层 | 位置 | 职责 |
 |---|---|---|
 | 引擎（core） | `crates/script-engine/` | 跑 JS/TS（QuickJS + oxc 进程内转译）、`sleep` / `console` / `TextDecoder` / `TextEncoder` / 定时器 / `atob`·`btoa` / `performance` / `structuredClone`、**能力扩展机制**、**命名空间配置**（名字由使用方给） |
-| 使用方能力集 | `crates/clipbeam-scripting/` | **决定命名空间叫什么**（`NAMESPACE` / `NAMESPACE_ALIAS`）；用扩展机制注入 ClipBeam 需要的能力：编解码（hex / base32 / base64）、摘要（md5 / crc32）、压缩（zstd / gzip / brotli / xz）、文件系统（`$.read` / `$.write` …）、宿主交互（`$.type_str` / `$.confirm`）；`ScriptHost` 定义；脚本目录与内置示例；终端宿主 |
+| 使用方能力集 | `crates/clipbeam-scripting/` | **决定命名空间叫什么**（`NAMESPACE` / `NAMESPACE_ALIAS`）；用扩展机制注入 ClipBeam 需要的能力：编解码（hex / base32 / base64）、摘要（md5 / crc32）、压缩（zstd / gzip / brotli / xz）、文件系统（`$.read` / `$.write` …）、宿主交互（`$.type_str` / `$.confirm` / `$.pick_path`）；`ScriptHost` 定义；脚本目录与内置示例；终端宿主 |
 | 应用 | `src-tauri/`（`scripting.rs` / `standby.rs` / `console_panel.rs` / `script_runner.rs`） | 接 Tauri 命令、Worker 任务、`Typer` 键盘输出、**系统原生确认框与文件授权框**、**惰性待命窗口**、**Console 面板缓冲** |
 
 引擎本身**不认识**剪贴板 / 键盘 / Zstandard，**也不给能力命名空间起名字**：它建一个匿名对象，
@@ -305,6 +305,7 @@ for (let i = 0; i < parts.length; i++) {
 | `$.mkdir` / `$.remove` / `$.rename` / `$.copy` | 建目录（递归）/ 删除（目录递归）/ 改名移动 / 复制（目录递归），**都会先询问** |
 | `$.type_str(text, delayMs?)` | 把文本交给宿主输出：GUI 下逐个字符打进**当前焦点窗口**，命令行下打印到终端 |
 | `$.confirm(message)` | 向用户提问：GUI 下弹**系统原生**确认框（是 / 否 / 取消），命令行下读 stdin；回答「是」为 `true`、「否」为 `false`、取消/中止时抛异常，**不设超时**（一直等用户回答） |
+| `$.pick_path(prompt?, kind?)` | 让用户挑一个文件或文件夹：GUI 下弹**系统原生**选择框（`prompt` 是标题，`kind` 为 `"file"`（默认）/ `"dir"`），命令行下在终端里输入一行路径；返回**绝对路径**，取消（或没有选择界面）时返回 `null`。选到的路径**不额外授权**：照样受下面三条规则约束 |
 | `$.request_focus(hint?)` | 请求用户把焦点切到目标窗口并等待确认：GUI 下弹出待命窗口（`hint` 是显示给用户的提示，如「请点击远程记事本」），命令行下直接返回。脚本要在**中途**换一个输出目标时调用它 |
 | `console.log/info/debug/warn/error` | 写到脚本窗口底部的 **Console 面板**（按等级着色）；命令行运行时打到终端 |
 | `sleep(ms)`（**标准全局**） | 异步等待；等待期间被中止会立即返回。返回 Promise，**必须 `await`** |
@@ -313,7 +314,7 @@ for (let i = 0; i < parts.length; i++) {
 | `atob` / `btoa` | WHATWG 语义的 base64（只处理 Latin-1 字符串） |
 | `TextDecoder` / `TextEncoder` | 支持全部 WHATWG 编码标签（`utf-8` / `gbk` / `gb18030` / `big5` / `shift_jis` …） |
 
-### 文件系统的两条规则
+### 文件系统的三条规则
 
 1. **只接受绝对路径**。`~`（主目录）、`C:/x`、`C:\x`、git-bash 的 `/d/x`、Cygwin 的
    `/cygdrive/d/x` 都算绝对路径；相对路径直接报错 —— 脚本的工作目录取决于宿主怎么启动，
@@ -322,6 +323,8 @@ for (let i = 0; i < parts.length; i++) {
    写、追加、建目录、删除、改名、复制每次都会弹一个三按钮系统框：
    `允许一次` / `本次运行内该目录都允许` / `拒绝`。「本次运行内都允许」记在**本次运行**里，
    运行结束即失效（下次运行重新问）。命令行下非交互（管道 / 重定向）时一律按**拒绝**处理。
+3. **选路径不等于放行**。`$.pick_path` 只把路径字符串给你，不解除任何限制：
+   `read` 本来就不询问，写 / 删 / 改名 / 复制依旧会弹授权框（第 2 条）。
 
 脚本里可以直接使用**顶层 `await`**，不需要包 `async` IIFE。
 
@@ -369,9 +372,11 @@ for (let i = 0; i < parts.length; i++) {
 AX 时回退成「前台应用」级别），Windows 走 `GetForegroundWindow`；两者都不看窗口标题，所以
 浏览器切标签、文档改名**不会**被误判成换窗口。其它平台（Linux）不检测，行为与以前一致。
 
-**命令行**：`clipbeam script <文件>`，`$.type_str` 写终端、`$.confirm` 与文件授权读 stdin
-（不需要待命窗口：终端的焦点就是当前窗口）；加 `--raw` 时不走逐字打字节奏，
-适合把输出重定向到文件或管道。
+**命令行**：`clipbeam script <文件>`，`$.type_str` 写终端、`$.confirm` / `$.pick_path` 与
+文件授权读 stdin（不需要待命窗口：终端的焦点就是当前窗口）；加 `--raw` 时不走逐字打字节奏，
+适合把输出重定向到文件或管道。终端里没有原生选择框，`$.pick_path` 退化成「输入一行路径」：
+规则与脚本里的路径一致（`~`、`C:/x`、`/d/x` 都认），并要求它真的存在、类型对得上；
+非交互（管道 / 重定向）时按「没选到」返回 `null`。
 
 ### 脚本目录
 
@@ -762,6 +767,8 @@ CB1.<total>.<index>.<digest>.<data>
   读操作没有沙箱，修改操作会弹框确认（但确认框本身不是安全边界），只运行可信脚本；
 - **`$.confirm` 会一直等**：系统确认框不设超时，弹框期间 Worker 保持忙（其他任务无法启动）。
   此时按 Esc 只会**终止脚本**，系统弹框仍留在屏幕上，需要手动点掉；
+- **`$.pick_path` 同理**：选择框活着的时候 Worker 也保持忙，Esc 不会替你关掉它 ——
+  点「取消」才让脚本拿到 `null` 继续跑。
 - **弹框时主窗口会临时显形**：托盘模式下主窗口是隐藏的，而系统弹框需要应用处于激活状态，
   因此确认期间主窗口会短暂显示并获得焦点，回答后恢复隐藏。
 

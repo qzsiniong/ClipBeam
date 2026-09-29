@@ -190,6 +190,21 @@ interface ClipBeam {
 	 * @returns 回答「是」为 `true`；「否」为 `false`；用户选择中止时抛异常。
 	 */
 	confirm(message: string): Promise<boolean>
+
+	/**
+	 * 让用户挑一个文件或文件夹。
+	 *
+	 * GUI 下弹**系统原生**选择框（`prompt` 是标题），命令行下是在终端里输入一行路径。
+	 * 系统原生选择框一次只能挑一种，所以用 `kind` 指定挑什么。
+	 *
+	 * 选到的路径只是一个字符串：它**不**解除任何限制 —— `read` 本来就不询问，
+	 * 写 / 删 / 改名 / 复制依旧走原有的授权框。
+	 *
+	 * @param prompt 选择框标题 / 提示；省略或传空串时用默认文案。
+	 * @param kind `"file"`（默认）挑文件，`"dir"` 挑文件夹；其它值抛异常。
+	 * @returns 所选路径（**绝对路径**）；用户取消、或当前环境没有选择界面时返回 `null`。
+	 */
+	pick_path(prompt?: string, kind?: "file" | "dir"): Promise<string | null>
 }
 
 /** 能力命名空间的全局对象（脚本里的 `ClipBeam`）。 */

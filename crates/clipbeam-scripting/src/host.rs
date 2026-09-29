@@ -5,7 +5,7 @@
 //!
 //! * [`ScriptHost`] 是本 crate 定义的宿主接口，由使用方注入实现
 //!   （CLI 用终端，GUI 用 Tauri 窗口 + Typer）；
-//! * `$.type_str` / `$.confirm` / 文件写操作都通过它落地；
+//! * `$.type_str` / `$.confirm` / `$.pick_path` / 文件写操作都通过它落地；
 //! * `console.*` **不走**这里 —— 它归引擎的 `ConsoleHook`（CLI 写标准流、GUI 写面板），
 //!   因此 `ScriptHost` 的实现者通常也要单独实现 `ConsoleHook`。
 //!
@@ -16,7 +16,7 @@
 //! 具体能力间接使用它。存入动作由 `RuntimeOptions::prepare` 钩子完成，见
 //! [`crate::runtime_options`]。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rquickjs::{Ctx, JsLifetime, Result as QjsResult};
@@ -34,6 +34,19 @@ pub enum ConfirmChoice {
     No,
     /// 用户要求中止脚本。
     Abort,
+}
+
+/// `$.pick_path` 要让用户挑什么。
+///
+/// 系统原生选择框**一次只能挑一种**（文件或文件夹），所以这里是枚举而不是一个
+/// 「两个都能选」的开关 —— 后者在系统层面根本做不到，只会把困惑留给脚本作者。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PickKind {
+    /// 挑一个文件。
+    #[default]
+    File,
+    /// 挑一个文件夹。
+    Dir,
 }
 
 /// 脚本请求**修改**文件系统时的授权结果。
@@ -122,6 +135,19 @@ pub trait ScriptHost: Send + Sync + 'static {
     /// 绝不能永久阻塞：脚本运行在 Worker 线程上。
     fn confirm(&self, message: &str) -> Result<ConfirmChoice, HostError>;
 
+    /// 让用户挑一个文件或文件夹（`$.pick_path`）。
+    ///
+    /// * `prompt`：显示给用户的提示（GUI 下就是选择框标题），空串表示用默认文案；
+    /// * `kind`：挑文件还是文件夹。
+    ///
+    /// 返回 `Ok(None)` 表示**没有拿到路径**：用户取消，或者当前宿主根本没有选择界面
+    /// （headless / 命令行非交互）。调用方把它映射成 JS 的 `null`，**不是错误** ——
+    /// 取消是正常操作，不该逼着脚本 `try/catch`。
+    ///
+    /// 没有默认实现：每个宿主都得自己想一次「我这里能不能选路径、怎么选」，
+    /// 别让一个默认值把这个决定糊过去（有界面的宿主必须覆写它）。
+    fn pick_path(&self, prompt: &str, kind: PickKind) -> Result<Option<PathBuf>, HostError>;
+
     /// 询问是否允许脚本修改文件系统（`$.write*` / `$.remove` / …）。
     ///
     /// * `action`：面向用户的动作描述，例如 `写入`、`删除`、`重命名 → /tmp/b`；
@@ -158,6 +184,12 @@ impl ScriptHost for NoopHost {
 
     fn confirm(&self, _message: &str) -> Result<ConfirmChoice, HostError> {
         Err(HostError::Unsupported)
+    }
+
+    /// 没有选择界面：按「没拿到路径」处理（脚本侧是 `null`），而不是报错 ——
+    /// 与 `$.confirm` 在没人应答时按「否」处理是同一个思路：让脚本自己兜底。
+    fn pick_path(&self, _prompt: &str, _kind: PickKind) -> Result<Option<PathBuf>, HostError> {
+        Ok(None)
     }
 }
 
