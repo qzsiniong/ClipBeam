@@ -6,7 +6,7 @@
  * 未知命令只警告不抛错，方便发现"还没模拟哪条"。
  */
 import type { InvokeArgs } from '@tauri-apps/api/core'
-import { emitEvent, simulateRun } from './events'
+import { clearPluginConsole, emitEvent, pluginConsoleLines, pushPluginConsole, simulateRun } from './events'
 import {
   clearConsoleLines,
   consoleLinesSnapshot,
@@ -14,9 +14,12 @@ import {
   getConfig,
   getScript,
   listCapabilities,
+  listPlugins,
   listScripts,
   MOCK_DIR,
+  MOCK_PLUGINS_DIR,
   setConfig,
+  setPluginState,
   setRunning,
   writeScript,
 } from './state'
@@ -90,6 +93,35 @@ const COMMANDS = new Map<string, (payload: InvokeArgs | undefined) => unknown>([
   ['scripts_info', () => ({ dir: MOCK_DIR, seeded: 0 })],
   // 名字与别名与 Rust 侧 `clipbeam_scripting::NAMESPACE` / `NAMESPACE_ALIAS` 保持一致
   ['list_capabilities', () => ({ namespace: 'ClipBeam', alias: '$', capabilities: listCapabilities() })],
+  // 插件：发现 / 启停 / 日志（与 Rust 侧同名命令）
+  ['list_plugins', () => listPlugins()],
+  ['refresh_plugins', () => listPlugins()],
+  ['plugins_info', () => ({ dir: MOCK_PLUGINS_DIR })],
+  ['enable_plugin', (payload) => {
+    const id = String(arg(payload, 'id') ?? '')
+    const list = setPluginState(id, 'active')
+    void emitEvent('plugins-changed', list)
+    return list
+  }],
+  ['disable_plugin', (payload) => {
+    const id = String(arg(payload, 'id') ?? '')
+    const list = setPluginState(id, 'disabled')
+    void emitEvent('plugins-changed', list)
+    return list
+  }],
+  ['reload_plugin', (payload) => {
+    const id = String(arg(payload, 'id') ?? '')
+    const list = setPluginState(id, 'active')
+    void emitEvent('plugins-changed', list)
+    void pushPluginConsole(id, 'info', `▶ 重新加载 ${id}（浏览器 mock）`)
+    return list
+  }],
+  ['get_plugin_console', () => pluginConsoleLines()],
+  ['clear_plugin_console', () => {
+    clearPluginConsole()
+    void emitEvent('script-console-clear', { plugin_id: '' })
+    return null
+  }],
   ['get_script_console', () => consoleLinesSnapshot()],
   ['clear_script_console', () => {
     clearConsoleLines()

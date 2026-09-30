@@ -1,4 +1,4 @@
-import type { MockOutcome } from './types'
+import type { MockConsoleLine, MockOutcome } from './types'
 /**
  * mock 的事件编排：Console 行 + 后端的几个 worker-* 事件。
  *
@@ -52,4 +52,52 @@ export async function simulateRun(name: string) {
   setRunning(false)
   const outcome: MockOutcome = { title: '✓ 脚本执行完成（mock）', body: '浏览器里只演练事件与 Console，不执行真实脚本' }
   await emitEvent('worker-finished', outcome)
+}
+
+// ── 插件（日志与 toast）────────────────────────────────────────────────────
+
+/**
+ * mock 的插件日志：`插件 id → 行`。
+ *
+ * 真机是「每个插件一个 ConsoleBuffer」（见 `src-tauri/src/plugin_manager.rs`）；
+ * 这里用一张表模拟，事件名与脚本共用（`script-console`），但载荷多带 `plugin_id`。
+ */
+const PLUGIN_LOGS = new Map<string, MockConsoleLine[]>()
+let pluginLogSeq = 1
+
+/** 取一个插件的日志快照。 */
+export function pluginConsoleLines(id?: string): MockConsoleLine[] {
+  if (id)
+    return [...(PLUGIN_LOGS.get(id) ?? [])]
+  return [...PLUGIN_LOGS.values()].flat()
+}
+
+/** 清空插件日志。 */
+export function clearPluginConsole(): void {
+  PLUGIN_LOGS.clear()
+}
+
+/** 往某个插件的日志里塞一行，并推事件（界面上立刻可见）。 */
+export function pushPluginConsole(pluginId: string, level: string, text: string): void {
+  const line: MockConsoleLine = { seq: pluginLogSeq++, level, text, ts: Date.now() }
+  const lines = PLUGIN_LOGS.get(pluginId) ?? []
+  lines.push(line)
+  PLUGIN_LOGS.set(pluginId, lines.slice(-500))
+  void emitEvent('script-console', { plugin_id: pluginId, line })
+}
+
+/** 造一条插件 toast（`$plugin.toast` 落到界面的那条路）。 */
+export async function emitPluginToast(
+  pluginId = 'hello-plugin',
+  pluginName = '示例插件',
+  message = '来自插件的提示 👋',
+  level = 'info',
+): Promise<void> {
+  await emitEvent('plugin-toast', {
+    plugin_id: pluginId,
+    plugin_name: pluginName,
+    level,
+    message,
+    duration_ms: null,
+  })
 }

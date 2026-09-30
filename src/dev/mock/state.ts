@@ -1,4 +1,4 @@
-import type { MockCapability, MockConsoleLine, MockScriptMeta } from './types'
+import type { MockCapability, MockConsoleLine, MockPluginInfo, MockPluginState, MockScriptMeta } from './types'
 /**
  * mock 的"假后端状态"：初始夹具 + 内存状态 + 访问器。
  *
@@ -146,4 +146,59 @@ export function isRunning(): boolean {
 /** 改写"运行中"标志。 */
 export function setRunning(value: boolean): void {
   running = value
+}
+
+// ── 插件（对应 Rust `clipbeam_plugins` 的发现结果）──────────────────────────
+
+/** mock 的插件目录（真机是系统配置目录下的 ClipBeam/plugins）。 */
+export const MOCK_PLUGINS_DIR = `${MOCK_DIR}/plugins`
+
+/**
+ * mock 的插件清单：一个正常插件 + 一个清单有问题的插件。
+ *
+ * 两个都要有：界面必须能同时演示「可用」与「无效（带原因）」两种状态，
+ * 否则「坏插件也会显示」这条契约在浏览器里验不了。
+ */
+const PLUGINS: MockPluginInfo[] = [
+  {
+    id: 'hello-plugin',
+    name: '示例插件',
+    version: '0.1.0',
+    description: '演示插件框架：托盘动作 + 应用内提示 + 系统通知 + 原生确认框',
+    author: 'ClipBeam',
+    dir: `${MOCK_PLUGINS_DIR}/hello-plugin`,
+    entry: 'index.js',
+    state: 'disabled',
+    permissions: ['feedback', 'notification', 'system_dialog', 'tray'],
+    menus: [['hello', '打个招呼'], ['notify', '发一条系统通知'], ['confirm', '问一句（原生确认框）']],
+    error: null,
+    usable: true,
+  },
+  {
+    id: 'broken-plugin',
+    name: 'broken-plugin',
+    version: '-',
+    description: null,
+    author: null,
+    dir: `${MOCK_PLUGINS_DIR}/broken-plugin`,
+    entry: '-',
+    state: 'invalid',
+    permissions: [],
+    menus: [],
+    error: `找不到入口文件 "index.js"（在 ${MOCK_PLUGINS_DIR}/broken-plugin）`,
+    usable: false,
+  },
+]
+
+/** 当前 mock 的插件列表。 */
+export function listPlugins(): MockPluginInfo[] {
+  return PLUGINS.map(plugin => ({ ...plugin }))
+}
+
+/** 改动某个插件的状态（启用/停用/重新加载共用），返回新列表。 */
+export function setPluginState(id: string, state: MockPluginState): MockPluginInfo[] {
+  const plugin = PLUGINS.find(item => item.id === id)
+  if (plugin)
+    plugin.state = state
+  return listPlugins()
 }

@@ -1,5 +1,5 @@
 {
-  // 脚本类型检查配置（与运行时真源对齐）：内置示例（seed/）+ 两份能力声明。
+  // 脚本与插件类型检查配置（与运行时真源对齐）：内置示例（seed/）+ 三份能力声明。
   //
   // 为什么单独一份：根 tsconfig 走 project references（app/node），只覆盖 src/ 与前端代码；
   // 而脚本既要在编辑器里获得 `ClipBeam` / `$` / `TextDecoder` 的类型提示，又要能被
@@ -33,6 +33,11 @@
   "include": [
     "crates/clipbeam-scripting/seed/*.ts",
     "crates/script-engine/src/spec/engine.d.ts",
-    "crates/clipbeam-scripting/src/spec/clipbeam.d.ts"
+    "crates/clipbeam-scripting/src/spec/clipbeam.d.ts",
+    // 插件：类型声明 + 内置示例插件的 TS 入口。
+    // 用 `**` 而不是 `*`：插件示例是「一个插件一个目录」，
+    // 入口在 `seed/<插件 id>/index.ts`，比脚本示例深一层。
+    "crates/clipbeam-plugins/src/spec/plugins.d.ts",
+    "crates/clipbeam-plugins/seed/**/*.ts"
   ]
 }

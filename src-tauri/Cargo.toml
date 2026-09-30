@@ -21,6 +21,8 @@ path = "../examples/qr_e2e.rs"
 script-engine = { path = "../crates/script-engine" }
 # 使用方能力集：md5 / base32 / zstd / typeStr / confirm + 脚本目录 + CLI 宿主
 clipbeam-scripting = { path = "../crates/clipbeam-scripting" }
+# 插件运行框架：清单 / 目录发现 / 权限 / $plugin 能力 / 插件运行时组装
+clipbeam-plugins = { path = "../crates/clipbeam-plugins" }
 tauri = { version = "2", features = [
   "tray-icon",
   "image-png",

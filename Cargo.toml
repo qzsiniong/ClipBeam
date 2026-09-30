@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/script-engine",
   "crates/clipbeam-scripting",
+  "crates/clipbeam-plugins",
   "src-tauri",
 ]
 

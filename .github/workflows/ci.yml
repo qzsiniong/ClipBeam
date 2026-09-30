@@ -43,6 +43,14 @@ jobs:
       - name: 脚本 .d.ts 类型检查
         run: pnpm typecheck:scripts
 
+      # 编辑器给脚本/插件示例用的项目（crates/tsconfig.json）。
+      # 单独跑它，是因为 pnpm typecheck:scripts 的 include 是显式列举的，
+      # 而这里的 include 是**通配模式** —— 模式一旦写窄（例如漏掉
+      # `seed/<插件 id>/index.ts` 这一层），只有这个项目能发现，
+      # 表现为编辑器里插件入口报「找不到名称 $plugin」。
+      - name: 示例类型检查（编辑器项目）
+        run: pnpm typecheck:examples
+
       - name: 编辑器单测（vitest）
         run: pnpm test:editor
 
@@ -50,8 +58,9 @@ jobs:
         run: pnpm build
 
   # ubuntu 不装 Linux 图形栈依赖（gtk / webkit2gtk / pipewire / wayland …）：
-  # 这里只测两个跨平台 crate。src-tauri（clipbeam）的编译 + lint + 测试
-  # 交给 rust-app，在它的两个目标平台（macOS / Windows）上全量跑。
+  # 这里只测三个不依赖图形栈的 crate（引擎 / 脚本能力集 / 插件框架）。
+  # src-tauri（clipbeam）的编译 + lint + 测试交给 rust-app，
+  # 在它的两个目标平台（macOS / Windows）上全量跑。
   rust-crates:
     name: Rust crates（ubuntu）
     runs-on: ubuntu-latest
@@ -68,10 +77,10 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy（-D warnings）
-        run: cargo clippy -p script-engine -p clipbeam-scripting --all-targets -- -D warnings
+        run: cargo clippy -p script-engine -p clipbeam-scripting -p clipbeam-plugins --all-targets -- -D warnings
 
-      - name: 测试（脚本引擎 / 能力集）
-        run: cargo test -p script-engine -p clipbeam-scripting --no-fail-fast
+      - name: 测试（脚本引擎 / 脚本能力集 / 插件框架）
+        run: cargo test -p script-engine -p clipbeam-scripting -p clipbeam-plugins --no-fail-fast
 
   rust-app:
     name: Rust 应用（${{ matrix.os }}）

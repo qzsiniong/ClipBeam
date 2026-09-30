@@ -10,6 +10,7 @@
 //! 具体能力实现都在 `bindings/` 与使用方的扩展里，这里不做任何业务处理，
 //! 因此新增能力不需要改动运行时。
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -341,6 +342,86 @@ impl ScriptRuntime {
         self.eval_inner::<T>(&self.options.script_name, code).await
     }
 
+    /// 调一个**全局函数**，把 `payload` 以一个 JSON 值传进去，等它跑完（是 Promise 就 `await`）。
+    ///
+    /// 这是给「宿主攒着一批回调，之后反复唤醒」这种用法准备的 —— 典型场景是插件：
+    /// 入口脚本执行时注册一个回调（例如 `globalThis.onAction = (action) => {...}`），
+    /// 之后宿主每收到一个事件就调它一次。引擎不认识「事件」「插件」这些概念，
+    /// 这里只是「按名字调 JS 函数并递一个 JSON 参数」这件通用的事。
+    ///
+    /// * `payload` 只能传 **JSON 可表达**的值（对象 / 数组 / 字符串 / 数字 / 布尔 / null）：
+    ///   它被序列化成 JSON 文本，JS 侧 `JSON.parse` 还原成普通对象 ——
+    ///   rquickjs 0.14 没有 Rust ↔ JS 的 serde 互转，JSON 文本是这条路上最干净的一层；
+    /// * **不返回 JS 值**，只报告这次调用有没有成功。返回值要跨出异步作用域，
+    ///   而 rquickjs 这里没有 `Ctx::scope` 可用来安全地造临时 JS 值；
+    ///   回调需要「回答」宿主时，约定它调宿主提供的函数（宿主按需在上下文里放桥），
+    ///   而不是靠返回值 —— 见插件的托盘动作回调。
+    /// * 全局不存在、或者不是函数 → `Err`。**刻意不静默 no-op**：名字写错属于接线错误，
+    ///   宿主必须能立刻看见；
+    /// * 函数可以是 `async` 的，返回 Promise 会被 `await`；
+    /// * 函数抛出的异常按 [`ScriptRuntime::eval`] 的同一套规则变成 `Err`（带脚本名与行列）。
+    ///
+    /// ```no_run
+    /// # async fn demo(runtime: &script_engine::ScriptRuntime) -> anyhow::Result<()> {
+    /// runtime
+    ///     .eval::<()>("globalThis.onAction = (action) => console.log(action.id)")
+    ///     .await?;
+    /// runtime
+    ///     .eval_global("onAction", serde_json::json!({ "id": "hello" }))
+    ///     .await?;
+    /// # Ok(()) }
+    /// ```
+    pub async fn eval_global(&self, name: &str, payload: serde_json::Value) -> anyhow::Result<()> {
+        // 载荷走 JSON **文本**：`String::to_string()` 得到的是带引号、已转义的 JS 字符串字面量，
+        // 因此 `globalThis["__clipbeam_payload"] = "...";` 是安全的，不需要再手工转义。
+        let payload_literal = serde_json::Value::String(payload.to_string()).to_string();
+        // 两个名字都必须**每次唯一**：求值是以「全局脚本」模式跑的（见 quickjs-ng 的
+        // `eval_ret_idx` 收尾代码），脚本里顶层 `let` 声明的变量会留在全局词法环境里 ——
+        // 第二次调用同一个名字会直接报 `redeclaration`。
+        let (payload_global, callback_var) = temp_names();
+
+        // 临时全局承载本次载荷，求值结束（含抛异常）后在 `finally` 里删掉。
+        // 名字带进程内唯一序号：本方法可以在同一运行时上并发调用，
+        // 固定的名字会互相踩（`AsyncContext` 是共享的）。
+        let code = format!(
+            r#""use strict";
+globalThis["{payload_global}"] = {payload_literal};
+let {callback_var};
+try {{
+  {callback_var} = globalThis["{name}"];
+  if (typeof {callback_var} !== "function") {{
+    throw new TypeError("全局 {name} 不是函数（typeof " + typeof {callback_var} + "）");
+  }}
+  await {callback_var}(JSON.parse(globalThis["{payload_global}"]));
+}} finally {{
+  delete globalThis["{payload_global}"];
+}}"#
+        );
+
+        let filename = format!("{}:{name}", self.options.script_name);
+
+        let outcome: Result<(), String> = self
+            .ctx
+            .async_with(async move |ctx| {
+                let mut options = EvalOptions::default();
+                // 造一个「可 await 的函数体」，因此打开顶层 await 的求值模式
+                options.promise = true;
+                // 让错误栈显示脚本名 + 回调名
+                options.filename = Some(filename);
+
+                eval_and_value(&ctx, &code, options).await.map(|_| ())
+            })
+            .await;
+
+        // 与 `eval_inner` 一致：定时器只属于本次调用，用完全清掉，
+        // 否则上一次调用的回调会打到下一次调用里。
+        self.timers.cancel_repeating();
+        self.drain_idle(IDLE_DRAIN).await;
+        self.timers.clear_all();
+
+        outcome.map_err(anyhow::Error::msg)
+    }
+
     /// 有上限地推进一次引擎任务（见 [`IDLE_DRAIN`]）。
     ///
     /// `idle()` 是内部自旋的，遇到 `setInterval` 这类永不结束的任务不会返回；
@@ -417,6 +498,45 @@ impl ScriptRuntime {
 
         outcome.map_err(anyhow::Error::msg)
     }
+}
+
+/// 求值一段「async 函数体」代码并把**脚本的完成值**取出来（已拆掉引擎的外壳）。
+///
+/// 与 [`ScriptRuntime::eval_inner`] 的区别：这里把「求值 → 等待 Promise → 拆壳 → 错误转串」
+/// 抽成可复用的形状，供需要自己决定返回类型的调用方（[`ScriptRuntime::eval_global`]）使用。
+async fn eval_and_value<'js>(
+    ctx: &Ctx<'js>,
+    code: &str,
+    options: EvalOptions,
+) -> std::result::Result<Value<'js>, String> {
+    let evaluated = ctx
+        .eval_with_options::<Promise<'_>, _>(code, options)
+        .catch(ctx);
+
+    let settled = match evaluated {
+        Ok(promise) => promise.into_future::<Value<'_>>().await.catch(ctx),
+        Err(err) => Err(err),
+    };
+
+    match settled {
+        Ok(value) => unwrap_async_eval_result(ctx, value),
+        Err(err) => Err(stringify_caught_error(ctx, err)),
+    }
+}
+
+/// 本次求值用的临时名字：`(载荷全局名, 回调局部变量名)`。
+///
+/// 两者都带进程内唯一序号：异步求值都挂在同一个 [`AsyncContext`](rquickjs::AsyncContext) 上，
+/// 固定名字会让并发调用互相覆盖载荷；而求值按「全局脚本」模式编译，顶层 `let` 会留在
+/// 全局词法环境里，固定名字的第二次调用会直接报 `redeclaration`。
+/// 前缀刻意不含业务名 —— 载荷全局会短暂出现在脚本的全局对象上（`finally` 里立刻删掉）。
+fn temp_names() -> (String, String) {
+    static SEQ: AtomicU64 = AtomicU64::new(1);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    (
+        format!("__clipbeam_eval_{seq}"),
+        format!("__clipbeam_cb_{seq}"),
+    )
 }
 
 /// 拆掉 quickjs-ng 「async eval」的完成值外壳。

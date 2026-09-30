@@ -1,0 +1,28 @@
+[package]
+name = "clipbeam-plugins"
+version = "0.2.0"
+edition = "2021"
+description = "ClipBeam 插件运行框架：清单解析、目录发现、权限模型与 $plugin 能力（不含任何 Tauri 依赖）"
+license = "MIT"
+
+[dependencies]
+# 插件运行时就是引擎：这一层只做「插件语义」与「宿主接口」，不碰 Tauri
+script-engine = { path = "../script-engine" }
+# 写扩展本体需要 rquickjs 的类型；features 必须与 script-engine 保持一致
+rquickjs = { version = "0.14", features = ["futures", "array-buffer"] }
+# 清单 / 权限 / 事件载荷的序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+# 插件目录挂在系统配置目录下（与 scripts 同级）
+dirs = "5"
+log = "0.4"
+
+[features]
+# 给集成测试用：把 FakePluginHost 暴露出来（tests/ 是独立 crate，看不到 #[cfg(test)]）
+test-util = []
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+# 打开 test-util，让 tests/ 下的集成测试能用 FakePluginHost
+clipbeam-plugins = { path = ".", features = ["test-util"] }

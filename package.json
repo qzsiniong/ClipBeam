@@ -12,6 +12,7 @@
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
+    "typecheck:examples": "tsc -p crates/tsconfig.json",
     "test:editor": "vitest run"
   },
   "dependencies": {

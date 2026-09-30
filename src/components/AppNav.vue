@@ -1,5 +1,5 @@
 <!--
-  侧边栏的「导航区」：总览 / 脚本 / 设置。
+  侧边栏的「导航区」：总览 / 脚本 / 插件 / 设置。
 
   抽成独立组件的原因是两个窗口都要用同一套导航：
   * 主窗口（`main`）：脚本项打开**独立脚本窗口**；
@@ -8,7 +8,7 @@
   点「脚本」在脚本窗口里没有意义（已经在脚本窗口了），由父组件决定如何处理。
 -->
 <script setup lang="ts">
-import { ClipboardPaste, FileCode2, Settings as SettingsIcon } from 'lucide-vue-next'
+import { ClipboardPaste, FileCode2, Puzzle, Settings as SettingsIcon } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 
 const props = withDefaults(defineProps<{
@@ -22,13 +22,14 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  /** 用户点了某一项：给出它的路径（`/`、`/scripts`、`/settings`）。 */
+  /** 用户点了某一项：给出它的路径（`/`、`/scripts`、`/plugins`、`/settings`）。 */
   (e: 'navigate', path: string): void
 }>()
 
 const items = [
   { name: '总览', path: '/', icon: ClipboardPaste },
   { name: '脚本', path: '/scripts', icon: FileCode2 },
+  { name: '插件', path: '/plugins', icon: Puzzle },
   { name: '设置', path: '/settings', icon: SettingsIcon },
 ]
 

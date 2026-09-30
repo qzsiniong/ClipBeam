@@ -20,6 +20,7 @@
 - [快速开始](#快速开始)
 - [使用方法](#使用方法)
 - [脚本引擎（JS/TS）](#脚本引擎jsts)
+- [插件框架](#插件框架)
 - [配置与设置](#配置与设置)
 - [命令行子命令](#命令行子命令)
 - [构建](#构建)
@@ -464,10 +465,12 @@ macOS 显示 ⌘/⇧/⌥/⌃，Windows/Linux 显示 Ctrl/Shift/Alt：
 
 编辑器里的类型来自两个声明文件（`crates/script-engine/src/spec/engine.d.ts` 与
 `crates/clipbeam-scripting/src/spec/clipbeam.d.ts`），它们同时被
-`pnpm typecheck:scripts` 使用，因此**编辑器里的断言与命令行检查一致**：
+`pnpm typecheck:scripts`（显式列举）与 `pnpm typecheck:examples`（`crates/tsconfig.json`，
+按通配模式覆盖 `seed/` 下的示例）使用，因此**编辑器里的断言与命令行检查一致**：
 
 ```bash
-pnpm typecheck:scripts    # 用 tsc 检查内置示例（crates/clipbeam-scripting/seed/*.ts）与两份声明
+pnpm typecheck:scripts    # 用 tsc 检查显式列举的示例（crates/clipbeam-scripting/seed/*.ts）与声明文件
+pnpm typecheck:examples   # 编辑器项目：通配覆盖 seed 下的示例（含插件 seed/<id>/index.ts）
 pnpm test:editor          # 编辑器语义功能与快捷键格式化的单测
 ```
 
@@ -502,6 +505,96 @@ pnpm test:editor          # 编辑器语义功能与快捷键格式化的单测
 脚本拥有**与 ClipBeam 同等的本机权限**：`$.read` 可以读任意**绝对路径**、`$.type_str` 会把内容
 敲进当前焦点窗口。读操作没有沙箱也没有提示；写 / 删 / 改名 / 复制 / 建目录每次都会弹系统框
 确认（可以放行「本次运行内该目录」）。请只运行你信任的脚本。
+
+---
+
+## 插件框架
+
+脚本解决「**这一次**按几步做完某件事」；插件解决「**长期**给应用加一个功能入口」——
+自己的托盘菜单项、自己的提示与对话框（以及后续版本的自定义窗口）。两者都写 JS/TS，
+但生命周期、入口与能力集是分开的：插件常驻、由菜单触发，且**没有**键盘注入能力。
+
+> 完整设计（实现步骤、未来能力、使用说明）见 [`plugin.md`](./plugin.md)。本节是速查。
+
+### 插件长什么样
+
+`<配置目录>/ClipBeam/plugins/<id>/` 下的一个目录，**目录名必须等于清单里的 id**：
+
+```
+macOS   ~/Library/Application Support/ClipBeam/plugins/
+Windows %APPDATA%\ClipBeam\plugins\
+Linux   ~/.config/ClipBeam/plugins/
+
+hello-plugin/
+├── plugin.json     清单：身份 / 入口 / 权限 / 托盘菜单
+└── index.ts        入口（也可以写 .js；.ts 会用 oxc 在进程内转译）
+```
+
+首次启动会释放一个内置示例 `hello-plugin`（**已存在的文件不会被覆盖**，也不会自动启用）。
+
+`plugin.json`：
+
+```jsonc
+{
+  "id": "hello-plugin",          // 必填，须与目录名一致
+  "name": "示例插件",             // 缺省用 id
+  "version": "0.1.0",            // 缺省 0.0.0
+  "entry": "index.ts",           // 缺省 index.js；示例用 .ts 所以显式写出来
+  "permissions": {               // 缺省一个都不开
+    "feedback": true,            // $plugin.toast
+    "notification": true,        // $plugin.notify
+    "system_dialog": true,       // $plugin.alert / $plugin.confirm
+    "tray": true                 // $plugin.tray.* 与下面的 menus
+  },
+  "menus": [                     // 托盘动作菜单（需要 tray 权限）
+    { "id": "hello", "label": "打个招呼" }
+  ]
+}
+```
+
+### 插件能力 `$plugin`
+
+命名空间是 `ClipBeamPlugin`（别名 `$plugin`）——与脚本的 `$`（`ClipBeam`）**不是同一个对象**，
+插件里也没有 `$.type_str` / 待命窗口那一套。
+
+| 能力 | 说明 | 需要权限 |
+|---|---|---|
+| `$plugin.toast(message, options?)` | 应用内提示（右下角），**不阻塞**；`level` 取 `info` / `success` / `warning` / `error`，`durationMs` 缺省 4000（0 = 不自动消失） | `feedback` |
+| `$plugin.notify(title, body?)` | 系统通知（macOS 通知中心 / Windows Toast） | `notification` |
+| `$plugin.alert(message, options?)` | 系统原生提示框（只有一个「好」），`await` 到用户点掉 | `system_dialog` |
+| `$plugin.confirm(message, options?)` | 系统原生确认框：主按钮 `true`、次按钮 `false`、关闭/超时/第三个按钮 `null`；`options.buttons` 可换自定义文案 | `system_dialog` |
+| `$plugin.tray.onAction(cb)` | 登记托盘菜单动作回调（`cb` 收到 `{ id }`，`id` 是 `menus[].id`） | `tray` |
+| `$plugin.tray.setTooltip(text)` | 托盘鼠标悬停提示 | `tray` |
+| `$plugin.tray.setIcon(path)` | 托盘图标（相对插件目录的图片） | `tray` |
+| `$plugin.tray.setBadge(text \| null)` | 徽标文字（落在托盘状态行） | `tray` |
+
+```js
+// index.ts —— 入口在「启用插件」时执行一次，允许顶层 await
+console.log('hello-plugin 已启用')
+
+$plugin.tray.onAction(async (action) => {
+  if (action.id === 'hello')
+    $plugin.toast('你好 👋', { level: 'success' })
+})
+```
+
+**权限是「声明 → 拒绝未声明调用」**：没在 `plugin.json` 里声明就调用，会当场抛出一条说明
+「该往清单里加哪一项」的异常，而不是静默失效。这不是沙箱 —— 插件与 ClipBeam 同进程、
+拥有与脚本相同的本机权限，**请只装你信任的插件**。
+
+### 运行与调试
+
+主窗口侧边栏 →「插件」：列表里有状态（已关闭 / 运行中 / 异常 / 清单有问题）、声明的权限、
+托盘菜单项与最近错误；可以启用 / 停用 / **重新加载**（改完代码点它生效，当前版本没有热重载），
+底部是**该插件的日志**（插件的 `console.*` 与动作执行错误都在这里）。
+
+| 现象 | 原因 |
+|---|---|
+| 插件列表里显示「清单有问题」+ 原因 | 清单字段写错 / 目录名与 id 不一致 / 入口文件不在 |
+| 卡片上出现「未声明 xx 权限」 | `plugin.json` 的 `permissions` 少了对应开关 |
+| 点托盘菜单提示「插件没有启用」 | 插件处于关闭状态，去插件页打开它 |
+| 状态变成「异常」 | 入口执行报错，错误原文就在卡片上 |
+| 提示「疑似卡住」 | 上一个动作超过 5 秒没返回；引擎的中断是协作式的，死循环无法强行打断 |
 
 ---
 
@@ -608,10 +701,11 @@ scripts/release.sh 0.2.0 --commit --tag --push   # 全自动（会触发 CI 与�
 ```
 
 脚本会改这些地方：`src-tauri/tauri.conf.json`、`package.json`、`src-tauri/Cargo.toml`、
-`crates/{script-engine,clipbeam-scripting}/Cargo.toml`，再跑一次 `cargo check` 让
+`crates/{script-engine,clipbeam-scripting,clipbeam-plugins}/Cargo.toml`，再跑一次 `cargo check` 让
 `Cargo.lock` 跟上；随后默认执行与 CI 相同的一套门禁（`fmt` / `clippy -D warnings` /
-`cargo test --workspace` / `pnpm lint` / `typecheck:scripts` / `test:editor` / `build`，
-用 `--no-check` 可跳过）。工作区不干净、版本号不合法、tag 已存在（本地或远端）都会直接拒绝。
+`cargo test --workspace` / `pnpm lint` / `typecheck:scripts` / `typecheck:examples` /
+`test:editor` / `build`，用 `--no-check` 可跳过）。
+工作区不干净、版本号不合法、tag 已存在（本地或远端）都会直接拒绝。
 
 推 tag 之后 `Release` 工作流自动跑：`ci`（三平台测试）→ `verify`（tag 必须等于
 `tauri.conf.json` 的 version）→ `build`（macOS universal `.dmg` + Windows NSIS
@@ -641,25 +735,27 @@ cd src-tauri && cargo check --target x86_64-pc-windows-msvc
 ## 测试
 
 ```bash
-# 整个 workspace（引擎、能力集、Tauri 应用）
+# 整个 workspace（引擎、脚本能力集、插件框架、Tauri 应用）
 cargo test --workspace
 
-# 新增的两个 crate 是 clippy 干净的；src-tauri / build.rs 里有一批历史告警，
+# 三个不依赖图形栈的 crate 是 clippy 干净的；src-tauri / build.rs 里有一批历史告警，
 # 所以这里只对它们跑 clippy（要做全量门禁需先清掉历史告警）
-cargo clippy -p script-engine -p clipbeam-scripting --all-targets
+cargo clippy -p script-engine -p clipbeam-scripting -p clipbeam-plugins --all-targets
 
-# 只跑脚本引擎与能力集（第一次编译 QuickJS 的 C 代码较慢，之后很快）
+# 只跑脚本引擎 / 脚本能力集 / 插件框架（第一次编译 QuickJS 的 C 代码较慢，之后很快）
 cargo test -p script-engine
 cargo test -p clipbeam-scripting
+cargo test -p clipbeam-plugins
 
 # Tauri 侧的协议层单元测试与跨实现 E2E
 cd src-tauri
 cargo test
 cargo run --example qr_e2e   # JS(qrcode-generator) 产出帧 → Rust(rqrr) 解码的跨实现 E2E
 
-# 前端：构建 + 脚本类型检查
+# 前端：构建 + 脚本/插件类型检查
 pnpm build
-pnpm typecheck:scripts
+pnpm typecheck:scripts                    # 显式列举的示例与声明文件
+pnpm typecheck:examples                   # 编辑器项目：按通配模式覆盖 seed 下的示例
 pnpm lint
 ```
 
@@ -777,6 +873,7 @@ CB1.<total>.<index>.<digest>.<data>
 | 层 | 依赖 |
 |---|---|
 | 应用框架 | Tauri 2（tray-icon feature）、tauri-plugin-global-shortcut、tauri-plugin-clipboard-manager、tauri-plugin-notification |
+| 插件框架 | `clipbeam-plugins`（清单 / 发现 / 权限 / `$plugin` 能力）；一个插件一条线程 + 一个 QuickJS 运行时 |
 | 前端 | Vue 3 + Vite + TypeScript + Tailwind CSS v4 + shadcn-vue（reka-ui）+ Pinia + vue-router |
 | 异步运行时 | tokio（worker 任务用 spawn_blocking 执行同步业务调用） |
 | 键盘模拟 | CoreGraphics（macOS）、enigo（Windows/Linux） |

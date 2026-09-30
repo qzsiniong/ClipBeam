@@ -10,8 +10,8 @@ import type { ClipBeamDevHelpers } from './types'
  * await __CLIPBEAM_DEV__.runScript('01-quick-start.js') // 完整演练一次"运行脚本"
  * ```
  */
-import { emitEvent, pushConsole, simulateRun } from './events'
-import { firstScriptName, getConfig, listScripts } from './state'
+import { emitEvent, emitPluginToast, pushConsole, simulateRun } from './events'
+import { firstScriptName, getConfig, listPlugins, listScripts } from './state'
 
 /** 构造调试助手（挂到 `window` 上的对象）。 */
 export function createDevHelpers(): ClipBeamDevHelpers {
@@ -23,5 +23,7 @@ export function createDevHelpers(): ClipBeamDevHelpers {
     },
     scripts: listScripts,
     config: () => getConfig(),
+    plugins: listPlugins,
+    pluginToast: (message, level) => emitPluginToast(undefined, undefined, message, level),
   }
 }

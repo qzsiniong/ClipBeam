@@ -13,6 +13,9 @@ rquickjs = { version = "0.14", features = ["futures", "array-buffer"] }
 tokio = { version = "1", features = ["rt", "time", "macros"] }
 # 应用层错误包装
 anyhow = "1"
+# `ScriptRuntime::eval_global` 的载荷与返回值：Rust ↔ JS 之间走 JSON
+# （rquickjs 0.14 没有 serde 互转，所以这里只做 JSON 文本的序列化/反序列化）
+serde_json = "1"
 # WHATWG 编码实现：TextDecoder 支持 gbk / gb18030 / big5 / shift_jis 等全部标签
 encoding_rs = "0.8"
 # TypeScript → JavaScript：只做语法转译（剥类型、转 enum/namespace），不做 ES 降级。

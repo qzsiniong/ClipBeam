@@ -1,0 +1,19 @@
+{
+  "id": "hello-plugin",
+  "name": "示例插件",
+  "version": "0.1.0",
+  "description": "演示插件框架：托盘动作 + 应用内提示 + 系统通知 + 原生确认框",
+  "author": "ClipBeam",
+  "entry": "index.ts",
+  "permissions": {
+    "feedback": true,
+    "notification": true,
+    "system_dialog": true,
+    "tray": true
+  },
+  "menus": [
+    { "id": "hello", "label": "打个招呼" },
+    { "id": "notify", "label": "发一条系统通知" },
+    { "id": "confirm", "label": "问一句（原生确认框）" }
+  ]
+}

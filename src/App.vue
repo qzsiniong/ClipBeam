@@ -4,6 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
+import PluginToasts from '@/components/PluginToasts.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -22,6 +23,7 @@ const pageTitle = computed(() => {
   const map: Record<string, string> = {
     '/': '总览',
     '/scripting': '脚本',
+    '/plugins': '插件',
     '/settings': '设置',
   }
   return map[currentPath.value] || 'ClipBeam'
@@ -51,6 +53,9 @@ onMounted(async () => {
 </script>
 
 <template>
+  <!-- 插件 toast 宿主：主窗口与脚本窗口都要（进度/待命是浮动小窗，不渲染） -->
+  <PluginToasts v-if="!bareWindow" />
+
   <!-- 独立窗口(进度/待命):纯页面，无侧边栏 -->
   <router-view v-if="bareWindow" />
 

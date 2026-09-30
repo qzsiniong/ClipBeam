@@ -14,6 +14,10 @@ mod focus;
 mod hotkey;
 mod keymap;
 mod notify;
+mod plugin_commands;
+mod plugin_host;
+mod plugin_manager;
+mod plugin_window;
 mod progress_window;
 mod protocol;
 mod receive;
@@ -296,7 +300,31 @@ pub fn run() {
                 ),
                 Err(e) => log::warn!("初始化脚本目录失败: {e}"),
             }
-            tray::build(app, &cfg)?;
+            // 首次启动把内置示例插件写进插件目录(已存在的文件不覆盖)
+            match clipbeam_plugins::seed::ensure_seed_plugins() {
+                Ok(0) => {}
+                Ok(n) => log::info!(
+                    "已写入 {n} 个内置示例插件到 {}",
+                    clipbeam_plugins::catalog::plugins_dir_display()
+                ),
+                Err(e) => log::warn!("初始化插件目录失败: {e}"),
+            }
+
+            // 插件管理器先建起来:托盘菜单要按插件清单组装,所以必须在 build 之前
+            let manager = plugin_manager::PluginManager::new(app.handle().clone());
+            let plugin_menus = {
+                manager.refresh();
+                manager.plugin_tray_items()
+            };
+            app.manage(manager);
+            app.manage(std::sync::Arc::new(
+                plugin_host::PendingTrayRequests::default(),
+            ));
+
+            tray::build(app, &cfg, &plugin_menus)?;
+            // 托盘运行时请求(插件的 $plugin.tray.*)必须在主线程上执行
+            tray::setup_plugin_events(app.handle());
+
             // 启动时为空闲模式:仅注册发送/接收热键,Esc 不拦截
             hotkey::set_mode(app.handle(), &cfg, hotkey::HotkeyMode::Idle)?;
             app.manage(worker::WorkerState::new(cfg, app.handle().clone()));
@@ -305,6 +333,13 @@ pub fn run() {
         .on_tray_icon_event(tray::on_tray_event)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
+
+            // 插件菜单项(`plugin:<插件 id>:<动作 id>`)优先:它由插件清单动态生成
+            if let Some((plugin_id, action_id)) = tray::parse_plugin_menu_id(id) {
+                dispatch_plugin_action(app, plugin_id, action_id);
+                return;
+            }
+
             match id {
                 tray::M_QUIT => app.exit(0),
                 tray::M_SEND_RAW => {
@@ -423,9 +458,50 @@ pub fn run() {
             commands::open_main_window,
             commands::get_script_console,
             commands::clear_script_console,
+            // 插件
+            plugin_commands::list_plugins,
+            plugin_commands::refresh_plugins,
+            plugin_commands::enable_plugin,
+            plugin_commands::disable_plugin,
+            plugin_commands::reload_plugin,
+            plugin_commands::plugins_info,
+            plugin_commands::get_plugin_console,
+            plugin_commands::clear_plugin_console,
         ])
-        .run(tauri::generate_context!())
-        .expect("Tauri 应用启动失败");
+        .build(tauri::generate_context!())
+        .expect("Tauri 应用构建失败")
+        .run(|app, event| {
+            // 退出前停掉插件:置取消信号、等线程收尾,托盘子菜单随之消失。
+            // 不这么做的话,插件线程会在主线程结束后被进程强杀,可能留下半截状态。
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(manager) = app.try_state::<plugin_manager::PluginManager>() {
+                    manager.stop_all();
+                }
+            }
+        });
+}
+
+/// 把一次插件菜单点击派发给对应插件的线程。
+fn dispatch_plugin_action(app: &tauri::AppHandle, plugin_id: &str, action_id: &str) {
+    use tauri::Manager;
+
+    let Some(manager) = app.try_state::<plugin_manager::PluginManager>() else {
+        return;
+    };
+
+    // 插件没在运行:给出明确提示(而不是静默什么都不做)。用户可能忘了在插件页打开它。
+    if !manager.running_ids().iter().any(|id| id == plugin_id) {
+        let message = format!("插件 {plugin_id} 没有启用:请到「插件」页面打开它");
+        log::warn!("{message}");
+        crate::notify::notify("ClipBeam 插件", &message);
+        return;
+    }
+
+    let payload = serde_json::json!({ "id": action_id });
+    if let Err(err) = manager.dispatch_action(plugin_id, action_id, payload) {
+        log::warn!("派发插件动作失败:{err}");
+        crate::notify::notify("ClipBeam 插件", &err);
+    }
 }
 
 #[cfg(test)]

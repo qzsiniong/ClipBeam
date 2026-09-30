@@ -845,6 +845,7 @@ version = "0.2.0"
 dependencies = [
  "arboard",
  "clap",
+ "clipbeam-plugins",
  "clipbeam-scripting",
  "core-foundation",
  "core-graphics 0.24.0",
@@ -874,6 +875,21 @@ dependencies = [
  "winrt-notification",
  "xcap",
  "zstd",
+]
+
+[[package]]
+name = "clipbeam-plugins"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "clipbeam-plugins",
+ "dirs 5.0.1",
+ "log",
+ "rquickjs",
+ "script-engine",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -5319,6 +5335,7 @@ dependencies = [
  "oxc_span",
  "oxc_transformer",
  "rquickjs",
+ "serde_json",
  "tokio",
 ]
 

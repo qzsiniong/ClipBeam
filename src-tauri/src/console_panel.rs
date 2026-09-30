@@ -105,6 +105,17 @@ impl ConsoleBuffer {
     }
 }
 
+/// 让引擎的 `console.*` 直接落到这个缓冲上。
+///
+/// 脚本路径是通过宿主（`TauriScriptHost` 也实现了 `ConsoleHook`）转一手的；
+/// 插件路径直接这么用更直白：`PluginRuntimeOptions::console(buffer)`，
+/// 于是插件的 `console.log` 与宿主写入的运行状态行走的是同一个流。
+impl script_engine::ConsoleHook for ConsoleBuffer {
+    fn write(&self, level: &str, text: &str) {
+        self.push(level, text);
+    }
+}
+
 /// 当前时间（epoch 毫秒）。
 fn now_ms() -> u64 {
     SystemTime::now()

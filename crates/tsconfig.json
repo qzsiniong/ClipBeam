@@ -22,6 +22,12 @@
   },
   // 两个来源：
   //   - */src/spec/*.d.ts：脚本作者看到的全局声明（能力真源）
-  //   - */seed/*.ts：内置示例里的 TS 示例（`.js` 示例与根目录 scripts/ 保持一致，不在这里检查）
-  "include": ["*/src/spec/*.d.ts", "*/seed/*.ts"]
+  //   - */seed/**/*.ts：内置示例里的 TS 入口
+  //
+  // `**` 是必需的，不能简化成 `*/seed/*.ts`：示例的层级按 crate 不同 ——
+  // 脚本示例直接放在 `seed/`（`crates/clipbeam-scripting/seed/02-ts-demo.ts`），
+  // 而插件示例是「一个插件一个目录」（`crates/clipbeam-plugins/seed/hello-plugin/index.ts`），
+  // 深了一层。漏掉它，编辑器就会对那个文件回退到 inferred project（没有能力声明），
+  // 于是插件入口里的 `$plugin` / `ClipBeamPlugin` 报「找不到名称」。
+  "include": ["*/src/spec/*.d.ts", "*/seed/**/*.ts"]
 }

@@ -79,7 +79,47 @@ pub trait ScriptExtension: Send + Sync + 'static {
     /// 实现里只做「建 JS 函数并 `ns.set(..)`」；能力本体另行实现（见模块文档）。
     fn register<'js>(&self, ctx: &Ctx<'js>, ns: &Object<'js>) -> QjsResult<()>;
 
+    /// **嵌套能力**的注册钩子：把能力挂到命名空间下的对象上（例如 `tray`）。
+    ///
+    /// 需要它的原因是一条一致性校验：`spec()` 声明的名字必须真的挂在命名空间上
+    /// （见 [`setup`]）。像 `$plugin.tray.onAction` 这种**挂点在嵌套对象上**的能力，
+    /// 名字里带点、无法用「命名空间的自有属性名」表示，于是校验会误报。
+    ///
+    /// 与其放松那条校验（它挡的是「声明了却忘了注册」这类真实 bug），不如把嵌套这块
+    /// 交给一个**显式的钩子**，并把它的返回值交给校验去比对：
+    ///
+    /// * 在 `register` 里建好嵌套对象（例如 `ns["tray"]`）并挂上它的函数；
+    /// * 在这里返回该对象的成员名（例如 `vec!["onAction".to_string()]`）；
+    /// * `spec()` 里用**带点的完整路径**声明（`"tray.onAction"`）。
+    ///
+    /// 校验规则：带点的声明取最后一段，在该路径的对象里找 —— 于是「声明了没注册」
+    /// 依然会被抓住，只是校验位置从命名空间下沉了一层。
+    ///
+    /// 默认空：只挂顶层能力的扩展（绝大多数）不需要实现它。
+    ///
+    /// ```ignore
+    /// fn register(&self, ctx, ns) -> Result<()> {
+    ///     let tray = Object::new(ctx.clone())?;
+    ///     tray.set("onAction", Function::new(ctx.clone(), js_on_action)?)?;
+    ///     ns.set("tray", tray)
+    /// }
+    ///
+    /// fn register_nested(&self) -> Vec<(String, Vec<String>)> {
+    ///     vec![("tray".to_string(), vec!["onAction".to_string()])]
+    /// }
+    ///
+    /// fn spec(&self) -> Vec<CapabilitySpec> {
+    ///     vec![CapabilitySpec { name: "tray.onAction", signature: "..", doc: ".." }]
+    /// }
+    /// ```
+    fn register_nested(&self) -> Vec<(String, Vec<String>)> {
+        Vec::new()
+    }
+
     /// 声明本扩展提供的能力。默认空：适合只做副作用（例如初始化全局变量）的扩展。
+    ///
+    /// 名字是**能力的完整路径**：顶层能力直接写属性名（`md5`），
+    /// 嵌套能力写带点的路径（`tray.onAction`，配合 [`ScriptExtension::register_nested`]）。
     fn spec(&self) -> Vec<CapabilitySpec> {
         Vec::new()
     }
@@ -90,6 +130,40 @@ pub trait ScriptExtension: Send + Sync + 'static {
     fn allow_override(&self) -> bool {
         false
     }
+}
+
+/// 某个声明的能力名是否真的挂上了。
+///
+/// * **顶层能力**（`md5`）：在命名空间的自有属性名里找；
+/// * **嵌套能力**（`tray.onAction`）：先按 [`ScriptExtension::register_nested`] 的声明
+///   确认 `tray` 是一个对象、且 `onAction` 是它的成员，再在 `tray` 的自有属性名里找。
+///
+/// 嵌套这一支不能简化成「按点号 split 后逐层 get」：`register_nested` 的存在就是为了
+/// 让「挂到哪儿」是**声明出来的**，而不是让引擎去猜。猜的话，扩展在 `register` 里
+/// 挂了一个别处的对象也会被当成合规。
+fn capability_is_registered<'js>(
+    ctx: &Ctx<'js>,
+    ns: &Object<'js>,
+    name: &str,
+    nested: &[(String, Vec<String>)],
+) -> QjsResult<bool> {
+    let Some((path, member)) = name.split_once('.') else {
+        return Ok(property_names(ctx, ns)?.contains(name));
+    };
+
+    // 路径声明里必须正好有这一段，且成员名在它的成员列表里
+    let Some((_, members)) = nested.iter().find(|(declared, _)| declared == path) else {
+        return Ok(false);
+    };
+    if !members.iter().any(|declared| declared == member) {
+        return Ok(false);
+    }
+
+    // 声明了还不够：运行期真的得有一个对象挂在那儿，且成员真的在上面
+    let Ok(object) = ns.get::<_, Object>(path) else {
+        return Ok(false);
+    };
+    Ok(property_names(ctx, &object)?.contains(member))
 }
 
 /// 建命名空间 → 注册标准全局与内部原语 → 调用扩展 → 冻结命名空间。
@@ -168,8 +242,13 @@ pub(crate) fn setup<'js>(
         }
 
         // 反向检查：声明了却不注册 = 补全会提示一个运行期不存在的方法，属于 bug。
+        //
+        // 嵌套能力（名字带点，例如 `tray.onAction`）在**它所在的对象**上找：
+        // 「挂点在哪」由扩展的 `register_nested` 声明，没声明就说明它压根没打算
+        // 挂到嵌套对象上，按未注册报错。
+        let nested = extension.register_nested();
         for spec in &specs {
-            if !after.contains(spec.name) {
+            if !capability_is_registered(ctx, &ns, spec.name, &nested)? {
                 return Err(throw_with_message(
                     ctx,
                     &format!(

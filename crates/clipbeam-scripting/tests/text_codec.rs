@@ -222,6 +222,7 @@ fn extensions_are_opt_in() {
         "core 默认不应包含使用方扩展"
     );
     let console: Arc<dyn ConsoleHook> = Arc::new(StdoutConsole);
+    // 16：与 `capabilities.rs` 的统计口径一致（含引擎新增的 `register_nested`）
     assert_eq!(
         runtime_options(Arc::new(NoopHost), console)
             .extensions

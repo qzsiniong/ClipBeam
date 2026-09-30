@@ -19,6 +19,25 @@ export interface MockOutcome { title: string, body: string }
 /** 浏览器 mock 的窗口 label（与 `tauri.conf.json` 里的窗口 label 同名）。 */
 export type MockWindowLabel = 'main' | 'scripting' | 'progress' | 'standby'
 
+/** 插件状态（对应 Rust `PluginState`，serde 小写）。 */
+export type MockPluginState = 'invalid' | 'disabled' | 'active' | 'error' | 'stoptimeout'
+
+/** 一个插件（对应 Rust `PluginInfo`）。 */
+export interface MockPluginInfo {
+  id: string
+  name: string
+  version: string
+  description: string | null
+  author: string | null
+  dir: string
+  entry: string
+  state: MockPluginState
+  permissions: string[]
+  menus: [string, string][]
+  error: string | null
+  usable: boolean
+}
+
 /** 浏览器调试助手（仅 mock 模式挂到 `window.__CLIPBEAM_DEV__`）。 */
 export interface ClipBeamDevHelpers {
   /** 触发一个后端事件（走被 mock 的 `emit`，本机 `listen` 立刻收到）。 */
@@ -30,6 +49,10 @@ export interface ClipBeamDevHelpers {
   /** 当前 mock 的脚本清单 / 配置（只读视图）。 */
   scripts: () => MockScriptMeta[]
   config: () => Record<string, unknown>
+  /** 当前 mock 的插件清单（只读视图）。 */
+  plugins: () => MockPluginInfo[]
+  /** 造一条插件 toast（验证提示样式，不必真去点托盘菜单）。 */
+  pluginToast: (message?: string, level?: string) => Promise<void>
 }
 
 declare global {

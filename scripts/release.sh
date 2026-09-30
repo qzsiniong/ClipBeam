@@ -39,6 +39,7 @@ CARGO_FILES=(
   src-tauri/Cargo.toml
   crates/script-engine/Cargo.toml
   crates/clipbeam-scripting/Cargo.toml
+  crates/clipbeam-plugins/Cargo.toml
 )
 VERSION_FILES=("${JSON_FILES[@]}" "${CARGO_FILES[@]}")
 

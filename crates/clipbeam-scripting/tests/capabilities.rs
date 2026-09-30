@@ -1322,10 +1322,7 @@ fn restore_script_literal(source: &str) -> String {
     const BEGIN: &str = "function getRestoreScript(): string {\n\treturn `";
     const END: &str = "\n`;\n}";
 
-    let start = source
-        .find(BEGIN)
-        .expect("找不到 getRestoreScript 函数")
-        + BEGIN.len();
+    let start = source.find(BEGIN).expect("找不到 getRestoreScript 函数") + BEGIN.len();
     let end = source[start..]
         .find(END)
         .expect("找不到 getRestoreScript 模板字面量的结尾")
@@ -1464,8 +1461,7 @@ async fn pack_and_shard_seed_script_runs_end_to_end() {
         );
         // 无填充变体：任何一片（含最后一片）都不该出现 `=`
         assert!(
-            body
-                .chars()
+            body.chars()
                 .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c)),
             "分片 {name} 只应包含 base32 小写盘表字符：{body}"
         );
