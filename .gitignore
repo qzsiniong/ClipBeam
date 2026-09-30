@@ -2,6 +2,7 @@
 
 # Rust
 target/
+.cargo-home/
 **/*.rs.bk
 
 # Tauri

@@ -466,7 +466,10 @@ macOS 显示 ⌘/⇧/⌥/⌃，Windows/Linux 显示 Ctrl/Shift/Alt：
 编辑器里的类型来自两个声明文件（`crates/script-engine/src/spec/engine.d.ts` 与
 `crates/clipbeam-scripting/src/spec/clipbeam.d.ts`），它们同时被
 `pnpm typecheck:scripts`（显式列举）与 `pnpm typecheck:examples`（`crates/tsconfig.json`，
-按通配模式覆盖 `seed/` 下的示例）使用，因此**编辑器里的断言与命令行检查一致**：
+按通配模式覆盖 `seed/` 下的示例）使用，因此**编辑器里的断言与命令行检查一致**。
+
+> 你在**用户脚本目录**里写的 `.ts` 同样有提示：应用启动时会把
+> `engine.d.ts` / `clipbeam.d.ts` / `tsconfig.json` 写进那个目录（详见 `plugin.md` §10）。
 
 ```bash
 pnpm typecheck:scripts    # 用 tsc 检查显式列举的示例（crates/clipbeam-scripting/seed/*.ts）与声明文件
@@ -527,8 +530,14 @@ Linux   ~/.config/ClipBeam/plugins/
 
 hello-plugin/
 ├── plugin.json     清单：身份 / 入口 / 权限 / 托盘菜单
-└── index.ts        入口（也可以写 .js；.ts 会用 oxc 在进程内转译）
+├── index.ts        入口（也可以写 .js；.ts 会用 oxc 在进程内转译）
+└── relay.html      可选：`$plugin.window` 打开的页面（沙箱 iframe，只能用 postMessage）
 ```
+
+插件目录里还会被应用写入三个文件 —— `engine.d.ts`、`plugins.d.ts`、`tsconfig.json`
+（脚本目录同理：`engine.d.ts`、`clipbeam.d.ts`、`tsconfig.json`）。
+它们让 `.ts` 脚本/插件在编辑器里**有类型提示、写错就报红**，而运行环境（QuickJS，无 DOM）
+与编辑器看到的一致。这三个文件是**产物**（每次启动覆盖），改它们没有意义，要改类型请改仓库里的源声明。
 
 首次启动会释放一个内置示例 `hello-plugin`（**已存在的文件不会被覆盖**，也不会自动启用）。
 
@@ -544,7 +553,8 @@ hello-plugin/
     "feedback": true,            // $plugin.toast
     "notification": true,        // $plugin.notify
     "system_dialog": true,       // $plugin.alert / $plugin.confirm
-    "tray": true                 // $plugin.tray.* 与下面的 menus
+    "tray": true,                // $plugin.tray.* 与下面的 menus
+    "window": true               // $plugin.window.*
   },
   "menus": [                     // 托盘动作菜单（需要 tray 权限）
     { "id": "hello", "label": "打个招呼" }
@@ -567,6 +577,11 @@ hello-plugin/
 | `$plugin.tray.setTooltip(text)` | 托盘鼠标悬停提示 | `tray` |
 | `$plugin.tray.setIcon(path)` | 托盘图标（相对插件目录的图片） | `tray` |
 | `$plugin.tray.setBadge(text \| null)` | 徽标文字（落在托盘状态行） | `tray` |
+| `$plugin.window.open(options?)` | 开一个自己的窗口，页面取自插件目录（**沙箱 iframe**，见下） | `window` |
+| `$plugin.window.post(id, msg)` | 往窗口页面发消息（页面用 `window.onmessage` 收） | `window` |
+| `$plugin.window.onMessage(id, cb)` | 收窗口页面发来的消息 | `window` |
+| `$plugin.window.onClosed(id, cb)` | 窗口关闭（用户关 / 你关 / 页面异常都会触发） | `window` |
+| `$plugin.window.close(id)` | 关掉窗口（幂等） | `window` |
 
 ```js
 // index.ts —— 入口在「启用插件」时执行一次，允许顶层 await
@@ -576,6 +591,15 @@ $plugin.tray.onAction(async (action) => {
   if (action.id === 'hello')
     $plugin.toast('你好 👋', { level: 'success' })
 })
+```
+
+**窗口的页面不是随便放哪儿都行**：它必须是**插件目录内**的 HTML（越界路径会被拒绝），
+而且跑在**沙箱 iframe** 里 —— 页面拿不到宿主的 IPC，只能用 `postMessage` 与插件通信：
+
+```js
+// 页面里（沙箱 iframe）
+window.parent.postMessage({ hello: 'world' }, '*')
+window.addEventListener('message', (event) => console.log('插件说：', event.data))
 ```
 
 **权限是「声明 → 拒绝未声明调用」**：没在 `plugin.json` 里声明就调用，会当场抛出一条说明

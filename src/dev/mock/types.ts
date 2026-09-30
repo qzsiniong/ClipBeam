@@ -16,8 +16,18 @@ export interface MockCapability { name: string, signature: string, doc: string, 
 /** 任务结束时 Console 里的结果行（对应 Rust `TaskOutcome`）。 */
 export interface MockOutcome { title: string, body: string }
 
-/** 浏览器 mock 的窗口 label（与 `tauri.conf.json` 里的窗口 label 同名）。 */
-export type MockWindowLabel = 'main' | 'scripting' | 'progress' | 'standby'
+/**
+ * 浏览器 mock 的窗口 label。
+ *
+ * 前四个与 `tauri.conf.json` 里静态声明的窗口同名；`plugin-window-*` 是 Rust 在运行期
+ * 给插件窗口动态分配的标签（因此这里是模板字面量类型，不是固定枚举）。
+ */
+export type MockWindowLabel
+  = | 'main'
+    | 'scripting'
+    | 'progress'
+    | 'standby'
+    | `plugin-window-${string}`
 
 /** 插件状态（对应 Rust `PluginState`，serde 小写）。 */
 export type MockPluginState = 'invalid' | 'disabled' | 'active' | 'error' | 'stoptimeout'

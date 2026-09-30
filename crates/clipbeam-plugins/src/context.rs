@@ -27,6 +27,8 @@ pub struct PluginShared {
     actions: ActionRegistry,
     /// 动作回调的全局函数名自增序号。
     next_action: u64,
+    /// 插件内窗口 id 的自增序号（`w1` / `w2`…）。
+    next_window: u64,
 }
 
 impl PluginShared {
@@ -51,6 +53,15 @@ impl PluginShared {
         let global_name = format!("__plugin_action_{}", self.next_action);
         self.actions.register(key, &global_name);
         global_name
+    }
+
+    /// 下一个插件内窗口 id 的序号。
+    ///
+    /// 由宿主分配而不是让插件自己造：两个窗口重名会让它们的回调互相覆盖，
+    /// 而插件未必意识到这件事。
+    pub fn next_window_id(&mut self) -> u64 {
+        self.next_window += 1;
+        self.next_window
     }
 
     /// 动作表（宿主在插件启用后读它，用来知道该建哪些托盘菜单项）。

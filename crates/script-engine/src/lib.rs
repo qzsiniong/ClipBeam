@@ -106,7 +106,9 @@ pub mod bindings;
 pub mod cancel;
 pub mod console_hook;
 pub mod extension;
+pub mod portable;
 pub mod runtime;
+pub mod spec;
 pub mod ts;
 
 pub use cancel::CancelSignal;

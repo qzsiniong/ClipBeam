@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use clipbeam_plugins::catalog::{self, PluginRecord};
 use clipbeam_plugins::{runtime, PermissionSet, PluginHost, PluginMeta, PluginRuntimeOptions};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::console_panel::{ConsoleBuffer, ConsoleLine};
 use crate::plugin_host::TauriPluginHost;
@@ -97,6 +97,11 @@ enum PluginCommand {
         /// 传给回调的载荷。
         payload: serde_json::Value,
     },
+    /// 把一条**窗口事件**交给插件线程（页面来消息了 / 窗口关掉了）。
+    ///
+    /// 与 `Action` 的区别只在语义：两者最终都会调 `eval_action` 唤醒插件登记的回调。
+    /// 分开是为了让日志与「动作 id 从哪来」在代码里可读。
+    WindowNotice(clipbeam_plugins::WindowNotice),
     /// 停用：置取消信号并让线程退出。
     Stop,
 }
@@ -305,7 +310,12 @@ impl PluginManager {
             return Ok(());
         };
 
-        // 先取消：插件正在跑的长动作（对话框、sleep）会尽早收手
+        // 1) 先关掉它的全部窗口：窗口是「插件的一部分」，插件停了就不该留着
+        //    （页面里的脚本已经没有对话对象了，留着只会变成僵尸窗口）。
+        //    这一步同时把窗口从登记表摘掉，前端被销毁时会收到关闭事件但不会再冒泡给插件。
+        self.close_windows_of(id);
+
+        // 2) 取消：插件正在跑的长动作（对话框、sleep）会尽早收手
         plugin.cancel.cancel();
         let _ = plugin.tx.send(PluginCommand::Stop);
 
@@ -377,6 +387,26 @@ impl PluginManager {
                 payload,
             })
             .map_err(|_| format!("插件 {id:?} 的线程已退出"))
+    }
+
+    /// 把一个窗口事件交给某个插件的线程。
+    ///
+    /// 插件没在运行 / 线程已经退出时返回错误：调用方（宿主能力实现）会把它变成
+    /// 插件侧的一次失败 —— 「窗口已经不在」这种状态必须让插件知道，
+    /// 而不是悄悄丢掉一条消息。
+    pub fn deliver_window_notice(
+        &self,
+        plugin_id: &str,
+        notice: clipbeam_plugins::WindowNotice,
+    ) -> Result<(), String> {
+        let running = self.running.lock().unwrap();
+        let Some(plugin) = running.get(plugin_id) else {
+            return Err(format!("插件 {plugin_id:?} 没有在运行"));
+        };
+        plugin
+            .tx
+            .send(PluginCommand::WindowNotice(notice))
+            .map_err(|_| format!("插件 {plugin_id:?} 的线程已退出"))
     }
 
     /// 插件日志缓冲（没有就建一个）。
@@ -457,6 +487,25 @@ impl PluginManager {
                     })
             })
             .collect()
+    }
+
+    /// 关掉某个插件的全部窗口（停用/重载时用）。
+    ///
+    /// 幂等：没有窗口时什么也不做。**必须**在插件线程退出之前调，
+    /// 否则窗口里的页面可能还会往一个已经不存在的插件线程发消息。
+    fn close_windows_of(&self, plugin_id: &str) {
+        let Some(windows) = self
+            .app
+            .try_state::<std::sync::Arc<crate::plugin_host::PluginWindows>>()
+        else {
+            return;
+        };
+        for window in windows.remove_all_of(plugin_id) {
+            if let Some(webview) = self.app.get_webview_window(&window.label) {
+                let _ = webview.close();
+            }
+            log::debug!("停用插件 {plugin_id} 时关掉了窗口 {}", window.label);
+        }
     }
 
     /// 取一条发现记录（内部用）。
@@ -656,6 +705,37 @@ fn run_plugin_thread(
                     Err(err) => {
                         let message = format!("动作 {id:?} 执行失败：{err}");
                         console.push("error", &message);
+                    }
+                }
+            }
+            // 窗口事件：把「哪个窗口、什么事件」翻译成动作表里的键，再唤醒插件登记的回调
+            PluginCommand::WindowNotice(notice) => {
+                if cancel.is_cancelled() {
+                    break;
+                }
+                let key = clipbeam_plugins::extensions::window::window_notice_key(&notice);
+                let payload = match &notice {
+                    // 消息：把页面发来的值原样递进去
+                    clipbeam_plugins::WindowNotice::Message { message, .. } => message.clone(),
+                    // 关闭：没有载荷（回调是无参的）
+                    clipbeam_plugins::WindowNotice::Closed { .. } => serde_json::json!({}),
+                };
+
+                busy.store(true, Ordering::SeqCst);
+                let outcome = rt.block_on(runtime.eval_action(&key, payload));
+                busy.store(false, Ordering::SeqCst);
+
+                match outcome {
+                    Ok(()) => log::debug!("插件 {plugin_id} 处理了窗口事件 {key}"),
+                    Err(err) => {
+                        // 窗口回调没登记是**常见**情况（插件可能只关心消息、不关心关闭），
+                        // 所以这类失败记成 debug，不往插件日志里刷红行
+                        let message = format!("窗口事件 {key} 未处理：{err}");
+                        if key.ends_with(":closed") {
+                            log::debug!("{message}");
+                        } else {
+                            console.push("warn", &message);
+                        }
                     }
                 }
             }

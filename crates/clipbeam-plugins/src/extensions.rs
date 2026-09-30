@@ -23,6 +23,7 @@ use script_engine::ScriptExtension;
 
 pub mod feedback;
 pub mod tray;
+pub mod window;
 
 /// 声明一个能力扩展：一次写清「挂哪些函数」与「签名是什么」。
 ///
@@ -104,6 +105,8 @@ pub fn extensions() -> Vec<Arc<dyn ScriptExtension>> {
         Arc::new(feedback::ConfirmExtension),
         // 托盘：动作回调登记 + 运行时控制（挂点是嵌套对象 `tray`）
         Arc::new(tray::TrayExtension),
+        // 窗口：开窗 / 收发消息 / 关窗（挂点是嵌套对象 `window`）
+        Arc::new(window::WindowExtension),
     ]
 }
 

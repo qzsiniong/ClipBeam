@@ -46,6 +46,9 @@ pub fn permission_of(name: &str) -> crate::Permission {
         "notify" => crate::Permission::Notification,
         "alert" | "confirm" => crate::Permission::SystemDialog,
         "tray.onAction" | "tray.setTooltip" | "tray.setBadge" => crate::Permission::Tray,
+        "window.open" | "window.post" | "window.onMessage" | "window.onClosed" | "window.close" => {
+            crate::Permission::Window
+        }
         other => panic!("能力 {other} 没有归到任何权限组：请更新 spec::permission_of"),
     }
 }
@@ -113,6 +116,11 @@ mod tests {
                 "tray.onAction",
                 "tray.setTooltip",
                 "tray.setBadge",
+                "window.open",
+                "window.post",
+                "window.onMessage",
+                "window.onClosed",
+                "window.close",
             ],
             "能力清单的顺序与内容变化会被前端与文档看到"
         );

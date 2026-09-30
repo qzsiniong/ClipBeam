@@ -73,6 +73,7 @@
 
 pub mod catalog;
 pub mod context;
+pub mod declarations;
 pub mod error;
 pub mod extensions;
 pub mod host;
@@ -89,7 +90,8 @@ pub mod test_support;
 pub use error::PluginError;
 pub use host::{
     ActionRegistry, DialogButtons, DialogChoice, Feedback, FeedbackOutcome, PluginHost, PluginMeta,
-    ToastLevel, TrayOutcome, TrayRequest,
+    ToastLevel, TrayOutcome, TrayRequest, WindowNotice, WindowOptions, WindowRequest,
+    WindowRequestMessage, WindowResponse,
 };
 pub use manifest::{PluginManifest, PluginMenuItem};
 pub use permission::{Permission, PermissionSet};

@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window of ClipBeam",
+  "description": "ClipBeam 各窗口的能力：主窗口/脚本/进度/待命 + 运行期动态创建的插件窗口（plugin-window-*）",
   "windows": [
     "main",
     "progress",
     "standby",
-    "scripting"
+    "scripting",
+    "plugin-window-*"
   ],
   "permissions": [
     "core:default",

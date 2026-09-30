@@ -13,6 +13,16 @@
 //
 // 改扩展能力时记得同步这个文件（tests/capabilities.rs 会校验不漂移）。
 
+// 依赖引擎声明的标准全局（`sleep` / `console` / `TextDecoder` / 定时器 …）：
+// 脚本里用得到它们，而它们不属于能力命名空间。
+//
+// 下面那条 `reference` 是**仓库内特有**的，应用把这份文件拷到用户数据目录时
+// 会把它整段删掉 —— 在平铺的用户目录里声明文件彼此同级，那条相对仓库结构的路径
+// 指不到任何东西。
+// PORTABLE-BEGIN
+/// <reference path="../../../script-engine/src/spec/engine.d.ts" />
+// PORTABLE-END
+
 /** 二进制入参：字符串按 UTF-8 编码，`ArrayBuffer` 与任何视图都按字节处理。 */
 type BinaryInput = string | ArrayBuffer | ArrayBufferView
 

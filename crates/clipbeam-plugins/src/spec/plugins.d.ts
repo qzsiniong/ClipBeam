@@ -12,6 +12,16 @@
 //
 // 改插件能力时记得同步这个文件（tests/spec_sync.rs 会校验不漂移）。
 
+// 依赖引擎声明的标准全局（`sleep` / `console` / `TextDecoder` / 定时器 …）：
+// 插件入口用得到它们，而它们不属于能力命名空间。
+//
+// 下面那条 `reference` 是**仓库内特有**的，应用把这份文件拷到用户数据目录时
+// 会把它整段删掉 —— 在平铺的用户目录里声明文件彼此同级，那条相对仓库结构的路径
+// 指不到任何东西。
+// PORTABLE-BEGIN
+/// <reference path="../../../script-engine/src/spec/engine.d.ts" />
+// PORTABLE-END
+
 /** toast 等级（决定配色）。 */
 type PluginToastLevel = 'info' | 'success' | 'warning' | 'error'
 
@@ -61,6 +71,61 @@ interface ClipBeamPluginTray {
 	setBadge(text: string | null): void
 }
 
+/** `$plugin.window.open` 的参数（都是「愿望」：尺寸由宿主夹取）。 */
+interface PluginWindowOptions {
+	/** 标题；缺省是「<插件名> 窗口」。 */
+	title?: string
+	/** 想要的宽度（逻辑像素）；宿主夹到 200~8000。 */
+	width?: number
+	/** 想要的高度；同上。 */
+	height?: number
+	/** 是否可缩放；缺省 `true`。 */
+	resizable?: boolean
+	/** 是否置顶；缺省 `false`。 */
+	alwaysOnTop?: boolean
+	/** 是否显示系统标题栏/边框；缺省 `true`。 */
+	decorations?: boolean
+	/** 是否透明（页面自带背景时用）；缺省 `false`。 */
+	transparent?: boolean
+	/** 是否居中；缺省 `false`（交给系统摆放）。 */
+	center?: boolean
+	/** 页面：相对插件目录的路径；缺省 `index.html`。 */
+	page?: string
+}
+
+/** `$plugin.window.open` 的返回值。 */
+interface PluginWindow {
+	/** 插件内唯一的窗口 id（`w1` / `w2`…）；后续 post / onMessage / close 都用它。 */
+	id: string
+	/** 宿主实际使用的窗口标签（诊断用，插件不需要自己拼）。 */
+	label: string
+	/** 窗口序号（同一个标签里的自增部分）。 */
+	seq: number
+}
+
+/** `$plugin.window`：自定义窗口能力。 */
+interface ClipBeamPluginWindow {
+	/**
+	 * 打开一个插件窗口，页面来自插件目录（缺省 `index.html`）。
+	 *
+	 * 页面跑在一个沙箱 `iframe` 里：它拿不到宿主的 IPC，只能用 `window.onmessage` /
+	 * `window.parent.postMessage` 与插件通信（见 `plugin.md` §5.4 的时序图）。
+	 */
+	open(options?: PluginWindowOptions): PluginWindow
+
+	/** 把一个 JSON 值发给窗口页面（页面用 `window.onmessage` 收）。 */
+	post(windowId: string, message: unknown): void
+
+	/** 登记某个窗口的页面消息回调；重复登记会覆盖。 */
+	onMessage(windowId: string, callback: (message: unknown) => void): void
+
+	/** 登记某个窗口的关闭回调（用户关掉、你自己关掉、页面异常都会触发）。 */
+	onClosed(windowId: string, callback: () => void): void
+
+	/** 关掉一个窗口（幂等：已经不在了也不报错）。 */
+	close(windowId: string): void
+}
+
 interface ClipBeamPlugin {
 	// ── 反馈 ────────────────────────────────────────────────────────────────
 
@@ -95,6 +160,11 @@ interface ClipBeamPlugin {
 
 	/** 托盘能力（动作回调登记、tooltip、徽标）。 */
 	tray: ClipBeamPluginTray
+
+	// ── 窗口 ────────────────────────────────────────────────────────────────
+
+	/** 自定义窗口：开窗、往页面发消息、收页面消息、关窗。 */
+	window: ClipBeamPluginWindow
 }
 
 /** 插件能力命名空间的全局对象（插件入口脚本里的 `ClipBeamPlugin`）。 */

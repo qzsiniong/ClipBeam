@@ -122,6 +122,16 @@ const COMMANDS = new Map<string, (payload: InvokeArgs | undefined) => unknown>([
     void emitEvent('script-console-clear', { plugin_id: '' })
     return null
   }],
+  // 插件窗口的 relay 命令：浏览器里没有真窗口，也没有自定义协议，
+  // 所以只记一行日志（界面照常渲染，只是插件的 iframe 加载不出内容）
+  ['plugin_window_message', (payload) => {
+    console.info('[clipbeam-mock] plugin_window_message：真机才会转给插件线程', arg(payload, 'label'), arg(payload, 'message'))
+    return null
+  }],
+  ['plugin_window_closed', (payload) => {
+    console.info('[clipbeam-mock] plugin_window_closed：真机才会摘掉窗口登记', arg(payload, 'label'))
+    return null
+  }],
   ['get_script_console', () => consoleLinesSnapshot()],
   ['clear_script_console', () => {
     clearConsoleLines()

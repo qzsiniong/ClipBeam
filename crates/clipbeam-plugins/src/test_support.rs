@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use crate::error::PluginError;
 use crate::host::{
     Feedback, FeedbackOutcome, PluginHost, PluginMeta, ToastLevel, TrayOutcome, TrayRequest,
+    WindowNotice, WindowRequest,
 };
 
 /// 记录型插件宿主。
@@ -22,6 +23,10 @@ pub struct FakePluginHost {
     feedbacks: Mutex<Vec<Feedback>>,
     /// 收到的托盘请求（按顺序）。
     trays: Mutex<Vec<TrayRequest>>,
+    /// 收到的窗口请求（按顺序）。
+    windows: Mutex<Vec<WindowRequest>>,
+    /// 宿主推给插件线程的窗口事件（按顺序）—— 测试里用来验证「消息真的送到了插件」。
+    notices: Mutex<Vec<WindowNotice>>,
     /// `feedback` 的回答；默认 [`FeedbackOutcome::Delivered`]。
     ///
     /// 对话框场景要能模拟「用户点了次按钮」「超时」等，所以这里是可配置的。
@@ -39,6 +44,8 @@ impl FakePluginHost {
             meta,
             feedbacks: Mutex::new(Vec::new()),
             trays: Mutex::new(Vec::new()),
+            windows: Mutex::new(Vec::new()),
+            notices: Mutex::new(Vec::new()),
             dialog_answer: Mutex::new(FeedbackOutcome::Delivered),
             stopped: AtomicBool::new(false),
             fail_feedback: Mutex::new(None),
@@ -83,6 +90,16 @@ impl FakePluginHost {
         self.trays.lock().unwrap().clone()
     }
 
+    /// 收到的窗口请求。
+    pub fn windows(&self) -> Vec<WindowRequest> {
+        self.windows.lock().unwrap().clone()
+    }
+
+    /// 宿主推给插件线程的窗口事件。
+    pub fn notices(&self) -> Vec<WindowNotice> {
+        self.notices.lock().unwrap().clone()
+    }
+
     /// 收到的 toast 列表：`(level, message)`。
     pub fn toasts(&self) -> Vec<(ToastLevel, String)> {
         self.feedbacks()
@@ -117,6 +134,23 @@ impl PluginHost for FakePluginHost {
     fn tray(&self, request: TrayRequest) -> Result<TrayOutcome, PluginError> {
         self.trays.lock().unwrap().push(request);
         Ok(TrayOutcome::Applied)
+    }
+
+    fn window(&self, request: WindowRequest) -> Result<(String, u32), PluginError> {
+        self.windows.lock().unwrap().push(request.clone());
+        match request {
+            // 假宿主也按「标签可预测」的规则回答，好让调用方不必特判
+            WindowRequest::Open { .. } => {
+                let seq = 1;
+                Ok((format!("plugin-window-{}-{seq}", self.meta.id), seq))
+            }
+            WindowRequest::Close { window_id } => Ok((window_id, 0)),
+        }
+    }
+
+    fn notify_window_event(&self, notice: WindowNotice) -> Result<(), PluginError> {
+        self.notices.lock().unwrap().push(notice);
+        Ok(())
     }
 
     fn stopped(&self) -> bool {

@@ -627,3 +627,323 @@ async fn all_capabilities_work_together() {
         .iter()
         .any(|r| matches!(r, Feedback::Dialog { .. })));
 }
+
+// ── 窗口（$plugin.window）──────────────────────────────────────────────────
+
+/// 未声明 `window` 权限时，五个窗口能力都要拒绝。
+#[tokio::test]
+async fn window_capabilities_are_denied_without_permission() {
+    let (runtime, _host) = runtime_with(PermissionSet::NONE).await;
+
+    let cases: [(&str, &str); 5] = [
+        (r#"$plugin.window.open({})"#, "$plugin.window.open"),
+        (
+            r#"$plugin.window.post("w1", { a: 1 })"#,
+            "$plugin.window.post",
+        ),
+        (
+            r#"$plugin.window.onMessage("w1", () => {})"#,
+            "$plugin.window.onMessage",
+        ),
+        (
+            r#"$plugin.window.onClosed("w1", () => {})"#,
+            "$plugin.window.onClosed",
+        ),
+        (r#"$plugin.window.close("w1")"#, "$plugin.window.close"),
+    ];
+
+    for (code, capability) in cases {
+        let message = eval_error(&runtime, code).await;
+        assert!(
+            message.contains("未声明"),
+            "{capability} 应当报权限错误：{message}"
+        );
+        assert!(message.contains("window"), "应当指出权限名：{message}");
+        assert!(message.contains(capability), "应当指出能力名：{message}");
+    }
+}
+
+/// `open` 把窗口请求送到宿主，并把宿主给的标签原样回给插件。
+#[tokio::test]
+async fn window_open_reaches_host_and_returns_the_label() {
+    let (runtime, host) = runtime_with(PermissionSet {
+        window: true,
+        ..PermissionSet::NONE
+    })
+    .await;
+
+    runtime
+        .run_entry(
+            "index.js",
+            r#"
+            globalThis.wins = [];
+            globalThis.wins.push($plugin.window.open({ title: "面板", width: 400, page: "ui.html" }));
+            globalThis.wins.push($plugin.window.open());
+            "#,
+        )
+        .await
+        .expect("跑入口失败");
+
+    let requests = host.windows();
+    assert_eq!(requests.len(), 2, "两次 open 应当都到宿主");
+
+    match &requests[0] {
+        clipbeam_plugins::WindowRequest::Open { window_id, options } => {
+            assert_eq!(options.title.as_deref(), Some("面板"));
+            assert_eq!(options.width, Some(400.0));
+            assert_eq!(options.page.as_deref(), Some("ui.html"));
+            assert!(!window_id.is_empty(), "宿主侧应当拿到窗口 id");
+        }
+        other => panic!("应当是 Open：{other:?}"),
+    }
+
+    // 两个窗口的 id 必须不同（重名会让回调互相覆盖）
+    let ids: Vec<String> = runtime
+        .runtime()
+        .eval("globalThis.wins.map((w) => w.id)")
+        .await
+        .expect("取回窗口 id 失败");
+    let mut unique = ids.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(ids.len(), 2, "两次 open 应当得到两个窗口：{ids:?}");
+    assert_eq!(unique.len(), 2, "窗口 id 不该重复：{ids:?}");
+
+    // 返回值里有 label / seq（插件不需要自己拼标签，但能看到宿主的决定）
+    let has_label: bool = runtime
+        .runtime()
+        .eval("typeof globalThis.wins[0].label === 'string' && globalThis.wins[0].label.length > 0")
+        .await
+        .expect("求值失败");
+    assert!(has_label, "应当回一个非空 label");
+}
+
+/// `post` / `close` 通过**窗口事件**这条通道到宿主，而不是窗口请求。
+#[tokio::test]
+async fn window_post_and_close_reach_the_host() {
+    let (runtime, host) = runtime_with(PermissionSet {
+        window: true,
+        ..PermissionSet::NONE
+    })
+    .await;
+
+    let win_id: String = runtime
+        .runtime()
+        .eval(
+            r#"
+            const win = $plugin.window.open();
+            $plugin.window.post(win.id, { text: "你好", list: [1, 2] });
+            $plugin.window.close(win.id);
+            win.id
+            "#,
+        )
+        .await
+        .expect("调用窗口能力失败");
+
+    let notices = host.notices();
+    assert_eq!(notices.len(), 1, "post 应当发一条窗口消息：{notices:?}");
+    match &notices[0] {
+        clipbeam_plugins::WindowNotice::Message { window_id, message } => {
+            assert_eq!(window_id, &win_id);
+            let payload = message.as_object().expect("载荷应当是对象");
+            assert_eq!(payload["windowId"], win_id);
+            assert_eq!(payload["message"]["text"], "你好");
+            assert_eq!(payload["message"]["list"][1], 2);
+        }
+        other => panic!("应当是 Message：{other:?}"),
+    }
+
+    let requests = host.windows();
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            clipbeam_plugins::WindowRequest::Close { window_id } if window_id == &win_id
+        )),
+        "close 应当到宿主：{requests:?}"
+    );
+}
+
+/// `undefined` 载荷：**按 JS 语义**让 `message` 字段缺失，而不是报错、也不是变成 null。
+///
+/// 这是刻意的：`post(id, undefined)` 与 `post(id, null)` 在 JS 里是两件事，
+/// 插件不该因为传了 undefined 就被打断；页面侧用 `"message" in event.data` 区分。
+#[tokio::test]
+async fn window_post_keeps_undefined_distinct_from_null() {
+    let (runtime, host) = runtime_with(PermissionSet {
+        window: true,
+        ..PermissionSet::NONE
+    })
+    .await;
+
+    runtime
+        .runtime()
+        .eval::<()>(
+            r#"
+            const w = $plugin.window.open();
+            $plugin.window.post(w.id, undefined);
+            $plugin.window.post(w.id, null);
+            "#,
+        )
+        .await
+        .expect("post 不该因为 undefined 报错");
+
+    let notices = host.notices();
+    assert_eq!(notices.len(), 2, "两次 post 都应当送到：{notices:?}");
+
+    let payload_of = |notice: &clipbeam_plugins::WindowNotice| match notice {
+        clipbeam_plugins::WindowNotice::Message { message, .. } => {
+            message.as_object().expect("载荷应当是对象").clone()
+        }
+        other => panic!("应当是 Message：{other:?}"),
+    };
+
+    let from_undefined = payload_of(&notices[0]);
+    assert!(
+        !from_undefined.contains_key("message"),
+        "undefined 应当让 message 字段缺失：{from_undefined:?}"
+    );
+
+    let from_null = payload_of(&notices[1]);
+    assert!(
+        from_null
+            .get("message")
+            .is_some_and(serde_json::Value::is_null),
+        "null 应当序列化成 null：{from_null:?}"
+    );
+}
+
+/// 窗口回调登记进动作表：宿主能按 `window:<id>:message` / `:closed` 找到它们。
+#[tokio::test]
+async fn window_callbacks_are_registered_under_window_scoped_keys() {
+    let (runtime, _host) = runtime_with(PermissionSet {
+        window: true,
+        ..PermissionSet::NONE
+    })
+    .await;
+
+    runtime
+        .run_entry(
+            "index.js",
+            r#"
+            const win = $plugin.window.open();
+            globalThis.got = [];
+            $plugin.window.onMessage(win.id, (msg) => { globalThis.got.push("msg:" + msg.n) });
+            $plugin.window.onClosed(win.id, () => { globalThis.got.push("closed") });
+            globalThis.winId = win.id;
+            "#,
+        )
+        .await
+        .expect("跑入口失败");
+
+    let keys = runtime.registered_action_keys().await;
+    let win_id: String = runtime
+        .runtime()
+        .eval("globalThis.winId")
+        .await
+        .expect("取回窗口 id 失败");
+
+    assert!(
+        keys.contains(&format!("window:{win_id}:message")),
+        "消息回调应当登记在窗口作用域键下：{keys:?}"
+    );
+    assert!(
+        keys.contains(&format!("window:{win_id}:closed")),
+        "关闭回调应当登记在窗口作用域键下：{keys:?}"
+    );
+
+    // 宿主按这个键唤醒 → 回调真的被调用，且载荷原样送达
+    runtime
+        .eval_action(
+            &format!("window:{win_id}:message"),
+            serde_json::json!({ "n": 7 }),
+        )
+        .await
+        .expect("唤醒消息回调失败");
+    runtime
+        .eval_action(&format!("window:{win_id}:closed"), serde_json::json!({}))
+        .await
+        .expect("唤醒关闭回调失败");
+
+    let got: String = runtime
+        .runtime()
+        .eval("globalThis.got.join('|')")
+        .await
+        .expect("取回记录失败");
+    assert_eq!(got, "msg:7|closed");
+}
+
+/// 同一个窗口的 `onMessage` 重复登记：以后者为准（与托盘 onAction 同一语义）。
+#[tokio::test]
+async fn window_on_message_reregistration_replaces() {
+    let (runtime, _host) = runtime_with(PermissionSet {
+        window: true,
+        ..PermissionSet::NONE
+    })
+    .await;
+
+    runtime
+        .run_entry(
+            "index.js",
+            r#"
+            const win = $plugin.window.open();
+            globalThis.got = [];
+            $plugin.window.onMessage(win.id, () => { globalThis.got.push("first") });
+            $plugin.window.onMessage(win.id, () => { globalThis.got.push("second") });
+            globalThis.winId = win.id;
+            "#,
+        )
+        .await
+        .expect("跑入口失败");
+
+    let win_id: String = runtime.runtime().eval("globalThis.winId").await.unwrap();
+    runtime
+        .eval_action(&format!("window:{win_id}:message"), serde_json::json!({}))
+        .await
+        .expect("唤醒失败");
+
+    let got: String = runtime
+        .runtime()
+        .eval("globalThis.got.join(',')")
+        .await
+        .unwrap();
+    assert_eq!(got, "second", "后登记的应当覆盖前一个");
+}
+
+/// 两个窗口各自的消息回调互不干扰（窗口是按 id 分流的）。
+#[tokio::test]
+async fn window_callbacks_are_isolated_per_window() {
+    let (runtime, _host) = runtime_with(PermissionSet {
+        window: true,
+        ..PermissionSet::NONE
+    })
+    .await;
+
+    runtime
+        .run_entry(
+            "index.js",
+            r#"
+            const a = $plugin.window.open();
+            const b = $plugin.window.open();
+            globalThis.got = [];
+            $plugin.window.onMessage(a.id, () => { globalThis.got.push("a") });
+            $plugin.window.onMessage(b.id, () => { globalThis.got.push("b") });
+            globalThis.a = a.id;
+            globalThis.b = b.id;
+            "#,
+        )
+        .await
+        .expect("跑入口失败");
+
+    let a: String = runtime.runtime().eval("globalThis.a").await.unwrap();
+    runtime
+        .eval_action(&format!("window:{a}:message"), serde_json::json!({}))
+        .await
+        .expect("唤醒失败");
+
+    let got: String = runtime
+        .runtime()
+        .eval("globalThis.got.join(',')")
+        .await
+        .unwrap();
+    assert_eq!(got, "a", "只该触发那个窗口的回调");
+}

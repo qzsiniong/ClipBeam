@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>hello-plugin 面板</title>
+    <!--
+      插件窗口里的页面：hello-plugin 的「面板」。
+
+      ## 这个页面跑在哪里
+
+      它跑在一个**沙箱 iframe** 里（`sandbox="allow-scripts"`，见 src/pages/PluginWindow.vue）。
+      因此：
+
+      * **没有** `window.__TAURI_INTERNALS__`，`invoke` 之类全都不可用 ——
+        插件页面不能直接调用宿主，只能和插件（JS 引擎里的那一半）说话；
+      * origin 是 `"null"`（没有 allow-same-origin），所以 localStorage / cookie 也别指望；
+      * 只能通过 `postMessage` 与宿主页通信，宿主页再把它转给插件。
+
+      ## 两个方向
+
+      * **我 → 插件**：`window.parent.postMessage(payload, '*')`
+      * **插件 → 我**：`window.addEventListener('message', ...)`，`event.data` 就是载荷
+
+      ## 为什么写得这么朴素
+
+      故意不引入任何构建产物：这个文件是**插件自己的资产**，由 `clipbeam-plugin://`
+      协议原样送出（不经 Vite）。真实插件当然可以自己打包一个 UI 框架进来，
+      示例里就把这件事说清楚：一个 HTML 文件就够了。
+    -->
+    <style>
+      :root { color-scheme: light dark }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.6 system-ui, -apple-system, "PingFang SC", sans-serif;
+      }
+      h1 { font-size: 16px; margin: 0 0 4px }
+      p.hint { margin: 0 0 12px; opacity: 0.7; font-size: 12px }
+      input, button { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid #8884 }
+      input { flex: 1; min-width: 0 }
+      .row { display: flex; gap: 8px; margin-bottom: 12px }
+      #log { margin: 0; padding: 8px 10px; border-radius: 8px; background: #8881; min-height: 120px; white-space: pre-wrap; word-break: break-word }
+    </style>
+  </head>
+  <body>
+    <h1>hello-plugin 面板</h1>
+    <p class="hint">
+      这个页面跑在沙箱 iframe 里：它没有宿主的 IPC，只能用 postMessage 与插件通信。
+    </p>
+
+    <div class="row">
+      <input id="text" value="来自页面的问候" />
+      <button id="send">发给插件</button>
+    </div>
+
+    <pre id="log"></pre>
+
+    <script>
+      const log = document.getElementById('log')
+      const input = document.getElementById('text')
+
+      function append(text) {
+        log.textContent += `${text}\n`
+      }
+
+      // 插件 → 我
+      window.addEventListener('message', (event) => {
+        append(`← 插件：${JSON.stringify(event.data)}`)
+      })
+
+      // 我 → 插件
+      function send(text) {
+        window.parent.postMessage({ from: 'page', text, at: Date.now() }, '*')
+        append(`→ 我发了：${text}`)
+      }
+
+      document.getElementById('send').addEventListener('click', () => send(input.value))
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') send(input.value)
+      })
+
+      // 打开了就先打一声招呼：让「双向通信是通的」一眼可见，不用先点按钮
+      window.parent.postMessage({ from: 'page', text: '页面已就绪', at: Date.now() }, '*')
+      append('→ 我发了：页面已就绪')
+    </script>
+  </body>
+</html>

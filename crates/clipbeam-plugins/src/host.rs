@@ -203,6 +203,94 @@ pub enum TrayOutcome {
     Applied,
 }
 
+/// 插件开窗时能提的**愿望**（不是命令）。
+///
+/// 命名沿用常见的前端习惯（`alwaysOnTop` / `decorations`），因此字段都带别名性的
+/// `*_some`：这里的 `Option` 表示「插件没提这件事」，宿主用缺省值填上。
+/// 尺寸之类的上下限一律由宿主夹取（见 `src-tauri/src/plugin_window.rs`）——
+/// 插件只表达意图，不决定宿主的资源边界。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowOptions {
+    /// 标题；缺省由宿主拼一个（通常是「<插件名> 窗口」）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// 想要的宽度（逻辑像素）；宿主会夹到合法区间。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    /// 想要的高度；同上。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    /// 是否可缩放；缺省 `true`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resizable: Option<bool>,
+    /// 是否置顶；缺省 `false`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub always_on_top: Option<bool>,
+    /// 是否显示系统标题栏/边框；缺省 `true`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decorations: Option<bool>,
+    /// 是否透明（插件页面要自带背景）；缺省 `false`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transparent: Option<bool>,
+    /// 是否居中；缺省 `false`（交给系统摆放）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<bool>,
+    /// 页面：相对插件目录的路径；缺省 `index.html`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
+}
+
+/// 窗口操作请求（插件线程 → 宿主）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum WindowRequest {
+    /// 打开一个窗口。
+    ///
+    /// 变体上再写一次 `rename_all` 是必要的：外层那个只作用于**变体名**，
+    /// 不作用于变体里的字段（`window_id` 否则会原样出现在 JSON 里）。
+    #[serde(rename_all = "camelCase")]
+    Open {
+        /// 插件侧的窗口 id（`open()` 返回给插件的那个，也是后续消息的路由键）。
+        window_id: String,
+        /// 插件提的愿望。
+        options: WindowOptions,
+    },
+    /// 关掉一个窗口。
+    #[serde(rename_all = "camelCase")]
+    Close {
+        /// 插件侧的窗口 id。
+        window_id: String,
+    },
+}
+
+/// 窗口请求（跨线程传递的完整消息体）。
+///
+/// 与 [`crate::TrayRequestMessage`](crate::host::TrayRequestMessage) 同一个形状：
+/// 请求序号 + 来源插件 + 内容。窗口动作必须在**应用主线程**上做，
+/// 所以它也是「发一条事件过去、等一条回执回来」。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowRequestMessage {
+    /// 请求序号（回执靠它配对）。
+    pub request_id: u64,
+    /// 哪个插件发的。
+    pub plugin_id: String,
+    /// 请求内容。
+    pub request: WindowRequest,
+}
+
+/// 窗口请求的回执。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowResponse {
+    /// 与请求配对的序号。
+    pub request_id: u64,
+    /// 成功时是 `Some((窗口标签, 序号))` —— 插件侧据此拼出可预测的窗口标签；
+    /// 失败时是具体的错误。
+    pub outcome: Result<Option<(String, u32)>, PluginError>,
+}
+
 /// 插件与外部世界交互的唯一入口。
 ///
 /// 实现必须是 `Send + Sync`：插件跑在自己的线程上，能力调用可能来自任意线程。
@@ -224,6 +312,24 @@ pub trait PluginHost: Send + Sync + 'static {
         Err(PluginError::Unsupported)
     }
 
+    /// 开/关一个插件窗口。
+    ///
+    /// 返回值是 `(窗口标签, 序号)`：**标签必须在建窗之前就定下来**
+    /// （它既是 Tauri 的窗口 id，也是前端路由参数），而序号由宿主分配 ——
+    /// 于是插件侧拿到的窗口 id 与宿主侧的标签是同一个东西的两种表示，
+    /// 插件不必也不该自己拼标签。
+    fn window(&self, _request: WindowRequest) -> Result<(String, u32), PluginError> {
+        Err(PluginError::Unsupported)
+    }
+
+    /// 把一个窗口事件通知给**插件线程**（宿主在同一条线程上唤醒回调）。
+    ///
+    /// 这条路径**不经过 `window()`**：它是「宿主主动告诉插件一件事」，
+    /// 而 `window()` 是「插件请求宿主做一件事」。方向不同，因此是两个方法。
+    fn notify_window_event(&self, _notice: WindowNotice) -> Result<(), PluginError> {
+        Err(PluginError::Unsupported)
+    }
+
     /// 插件自己的日志（宿主可以把它落到插件日志面板）。
     ///
     /// 默认空实现：`console.*` 走引擎的 `ConsoleHook`，这个方法留给宿主想额外记的场合。
@@ -235,6 +341,29 @@ pub trait PluginHost: Send + Sync + 'static {
     fn stopped(&self) -> bool {
         false
     }
+}
+
+/// 宿主推给插件线程的窗口事件。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum WindowNotice {
+    /// 窗口里的页面发来一条消息。
+    #[serde(rename_all = "camelCase")]
+    Message {
+        /// 插件侧的窗口 id。
+        window_id: String,
+        /// 页面发来的内容（原样透传）。
+        message: serde_json::Value,
+    },
+    /// 窗口已经没了（用户关掉、插件请求关闭、或页面崩溃）。
+    ///
+    /// **一定会通知**：它是插件释放「这个窗口的回调」的唯一时机。
+    /// 不通知的话，插件会持有一批永远不会被调用的回调。
+    #[serde(rename_all = "camelCase")]
+    Closed {
+        /// 插件侧的窗口 id。
+        window_id: String,
+    },
 }
 
 /// 插件清单声明的**动作表**的登记处。
@@ -431,6 +560,58 @@ mod tests {
             host.tray(TrayRequest::SetBadge { text: None }),
             Err(PluginError::Unsupported)
         ));
+        assert!(matches!(
+            host.window(WindowRequest::Close {
+                window_id: "w".into()
+            }),
+            Err(PluginError::Unsupported)
+        ));
         assert!(!host.stopped());
+    }
+
+    /// 窗口请求/回执的 JSON 形状（跨线程走 Tauri 事件，形状就是协议）。
+    #[test]
+    fn window_messages_roundtrip_through_json() {
+        let request = WindowRequestMessage {
+            request_id: 7,
+            plugin_id: "demo".into(),
+            request: WindowRequest::Open {
+                window_id: "w1".into(),
+                options: WindowOptions {
+                    title: Some("面板".into()),
+                    width: Some(400.0),
+                    always_on_top: Some(true),
+                    ..WindowOptions::default()
+                },
+            },
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains(r#""requestId":7"#), "{json}");
+        assert!(json.contains(r#""kind":"open""#), "{json}");
+        assert!(json.contains(r#""alwaysOnTop":true"#), "{json}");
+
+        let back: WindowRequestMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, request, "请求应当能往返");
+    }
+
+    /// 窗口事件通知也要能往返（宿主 → 插件线程）。
+    #[test]
+    fn window_notices_roundtrip_through_json() {
+        let notice = WindowNotice::Message {
+            window_id: "w1".into(),
+            message: serde_json::json!({ "text": "你好" }),
+        };
+        let json = serde_json::to_string(&notice).unwrap();
+        assert!(json.contains(r#""kind":"message""#), "{json}");
+        assert!(json.contains(r#""windowId":"w1""#), "{json}");
+
+        let back: WindowNotice = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, notice);
+
+        let closed = WindowNotice::Closed {
+            window_id: "w1".into(),
+        };
+        let json = serde_json::to_string(&closed).unwrap();
+        assert!(json.contains(r#""kind":"closed""#), "{json}");
     }
 }

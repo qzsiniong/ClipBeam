@@ -27,10 +27,11 @@ pub enum Permission {
     SystemDialog,
     /// `$plugin.tray.*` 与清单里的 `menus`
     Tray,
-    /// `$plugin.window.*` 与清单里的 `window`
+    /// `$plugin.window.*`
     ///
-    /// 窗口能力本身还没实现（见 `plugin.md` 的路线图），但清单字段与权限判定先落地：
-    /// 这样提前写好窗口配置的插件在实现落地后不需要改清单。
+    /// 插件可以开自己的窗口（页面放在插件目录里，见 `plugin.md` §5.4）。
+    /// 不需要在清单里额外声明什么：**页面路径由 `$plugin.window.open` 的参数给出**，
+    /// 宿主按插件目录解析并做越界校验。
     Window,
 }
 

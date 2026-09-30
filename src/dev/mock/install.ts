@@ -48,6 +48,11 @@ export function resolveWindowLabel(search: string, hash: string): MockWindowLabe
   const explicit = new URLSearchParams(search).get('window')
   if (explicit === 'main' || explicit === 'scripting' || explicit === 'progress' || explicit === 'standby')
     return explicit
+  // 插件窗口是动态标签（`plugin-window-*`）：真机上由 Rust 建窗时指定，
+  // 浏览器里用查询串模拟 —— 路由推断只能认出「这是某个插件窗口」，
+  // 具体标签由 `?window=` 给出
+  if (hash.startsWith('#/plugin-window'))
+    return 'plugin-window-demo-1' as MockWindowLabel
   if (hash.startsWith('#/scripting'))
     return 'scripting'
   if (hash.startsWith('#/progress'))

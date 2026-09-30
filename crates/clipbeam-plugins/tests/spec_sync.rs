@@ -67,27 +67,34 @@ async fn spec_dts_matches_runtime() {
     }
 }
 
-/// 嵌套接口里的成员，必须挂在 `$plugin.tray` 上。
+/// 嵌套接口里的成员，必须挂在对应的 `$plugin.<容器>` 上。
+///
+/// 容器清单是**显式列举**的（而不是「扫所有 `interface ClipBeamPlugin*`」）：
+/// 加一个新容器时应当在这里加一行，顺带把它的运行期挂点写清楚。
 #[tokio::test]
 async fn nested_spec_matches_runtime() {
     let runtime = runtime().await;
-    let declared = members_declared_in_spec("interface ClipBeamPluginTray {");
 
-    assert!(
-        declared.contains(&"onAction".to_string()),
-        "解析声明文件失败：{declared:?}"
-    );
+    let containers: [(&str, &str); 2] = [
+        ("interface ClipBeamPluginTray {", "tray"),
+        ("interface ClipBeamPluginWindow {", "window"),
+    ];
 
-    for name in &declared {
-        let kind: String = runtime
-            .runtime()
-            .eval(&format!("typeof $plugin.tray.{name}"))
-            .await
-            .expect("求值失败");
-        assert_eq!(
-            kind, "function",
-            "plugins.d.ts 声明了 tray.{name}，但运行期不是函数"
-        );
+    for (marker, container) in containers {
+        let declared = members_declared_in_spec(marker);
+        assert!(!declared.is_empty(), "解析 {marker} 失败，没读到任何成员");
+
+        for name in &declared {
+            let kind: String = runtime
+                .runtime()
+                .eval(&format!("typeof $plugin.{container}.{name}"))
+                .await
+                .expect("求值失败");
+            assert_eq!(
+                kind, "function",
+                "plugins.d.ts 声明了 {container}.{name}，但运行期不是函数"
+            );
+        }
     }
 }
 
@@ -95,22 +102,36 @@ async fn nested_spec_matches_runtime() {
 #[test]
 fn capabilities_are_all_declared_in_spec() {
     let top_level = members_declared_in_spec("interface ClipBeamPlugin {");
-    let tray_level = members_declared_in_spec("interface ClipBeamPluginTray {");
+
+    // 嵌套容器：能力名里的前缀 → 它在 d.ts 里的接口块
+    let containers: [(&str, &str); 2] = [
+        ("tray", "interface ClipBeamPluginTray {"),
+        ("window", "interface ClipBeamPluginWindow {"),
+    ];
 
     for capability in spec::capabilities() {
         let found = match capability.name.split_once('.') {
-            None => top_level.contains(&capability.name) || capability.name == "tray",
+            // 顶层能力：命名空间上的成员（`tray` / `window` 这两个容器本身也在这里）
+            None => top_level.contains(&capability.name),
             Some((container, member)) => {
-                // 目前只有一个嵌套容器；将来加别的容器时在这里扩
-                assert_eq!(container, "tray", "未知的嵌套容器：{}", capability.name);
-                top_level.contains(&container.to_string())
-                    && tray_level.contains(&member.to_string())
+                let marker = containers
+                    .iter()
+                    .find(|(prefix, _)| *prefix == container)
+                    .map(|(_, marker)| *marker)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "未知的嵌套容器：{}（请在 spec_sync.rs 的容器清单里登记）",
+                            capability.name
+                        )
+                    });
+                let nested = members_declared_in_spec(marker);
+                top_level.contains(&container.to_string()) && nested.contains(&member.to_string())
             }
         };
 
         assert!(
             found,
-            "能力 {} 没有写进 plugins.d.ts（顶层：{top_level:?}，嵌套：{tray_level:?}）",
+            "能力 {} 没有写进 plugins.d.ts（顶层：{top_level:?}）",
             capability.name
         );
     }

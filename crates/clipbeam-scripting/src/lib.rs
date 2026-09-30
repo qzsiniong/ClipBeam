@@ -29,6 +29,7 @@
 //! 3. 在 `src/spec/clipbeam.d.ts` 里补上类型声明（三个真源，缺一个都会被测试或类型检查抓到）。
 
 pub mod cmd;
+pub mod declarations;
 pub mod extensions;
 pub mod host;
 pub mod scripts;

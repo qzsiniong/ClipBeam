@@ -16,7 +16,7 @@ use crate::manifest::MANIFEST_FILE;
 ///
 /// 用 `include_str!` 而不是运行时读文件：示例必须跟着二进制走，
 /// 否则「装完就少一个样例」是最常见的分发事故。
-pub const SEED_PLUGINS: [(&str, [(&str, &str); 2]); 1] = [(
+pub const SEED_PLUGINS: [(&str, [(&str, &str); 3]); 1] = [(
     "hello-plugin",
     [
         (
@@ -24,6 +24,11 @@ pub const SEED_PLUGINS: [(&str, [(&str, &str); 2]); 1] = [(
             include_str!("../seed/hello-plugin/plugin.json"),
         ),
         ("index.ts", include_str!("../seed/hello-plugin/index.ts")),
+        // 演示窗口的页面：由 `clipbeam-plugin://` 协议原样送给沙箱 iframe
+        (
+            "relay.html",
+            include_str!("../seed/hello-plugin/relay.html"),
+        ),
     ],
 )];
 

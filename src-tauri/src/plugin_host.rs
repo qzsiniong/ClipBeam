@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use clipbeam_plugins::{
     DialogButtons, DialogChoice, Feedback, FeedbackOutcome, PluginError, PluginHost, PluginMeta,
-    TrayOutcome, TrayRequest,
+    TrayOutcome, TrayRequest, WindowNotice, WindowRequest, WindowResponse,
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::{
@@ -34,10 +34,20 @@ use tauri_plugin_dialog::{
 };
 
 use crate::plugin_manager::PluginManager;
+use crate::plugin_window::OpenWindow;
 use crate::tray;
 
 /// 托盘运行时请求的事件名（由主线程上的监听者处理，见 `tray::setup_plugin_events`）。
 pub const TRAY_REQUEST_EVENT: &str = "plugin-tray-request";
+
+/// 窗口请求的事件名（同样由主线程上的监听者处理）。
+pub const WINDOW_REQUEST_EVENT: &str = "plugin-window-request";
+
+/// 窗口请求的等待上限。
+///
+/// 比托盘长一点：建窗要等系统分配资源，而插件线程等这几秒没有代价
+/// （它与应用主线程是分开的）。
+const WINDOW_TIMEOUT_MS: u64 = 5_000;
 
 /// 托盘请求的等待上限：主线程忙不过来时不让插件线程一直吊着。
 const TRAY_TIMEOUT_MS: u64 = 3_000;
@@ -93,6 +103,165 @@ impl PendingTrayRequests {
     pub fn forget(&self, request_id: u64) {
         self.senders.lock().unwrap().remove(&request_id);
     }
+}
+
+/// 窗口请求（插件线程 → 主线程）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowRequestMessage {
+    /// 请求序号（回执靠它配对）。
+    pub request_id: u64,
+    /// 哪个插件发的。
+    pub plugin_id: String,
+    /// 请求内容。
+    pub request: WindowRequest,
+}
+
+/// 窗口请求的回执（主线程 → 插件线程）。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowRequestResult {
+    /// 与请求配对的序号。
+    pub request_id: u64,
+    /// 成功时是 `(窗口标签, 序号)`。
+    pub outcome: Result<Option<(String, u32)>, PluginError>,
+}
+
+/// 挂着待回执的窗口请求。
+///
+/// 与 [`PendingTrayRequests`] 是同一个手法、同一个理由：窗口动作只能在**主线程**做，
+/// 插件线程发一条事件出去、用 `recv_timeout` 等回执；主线程处理完按 `request_id` 找回发送端。
+#[derive(Default)]
+pub struct PendingWindowRequests {
+    senders: std::sync::Mutex<std::collections::HashMap<u64, mpsc::Sender<WindowRequestResult>>>,
+}
+
+impl PendingWindowRequests {
+    /// 登记一个等待中的请求。
+    pub fn register(&self, request_id: u64) -> mpsc::Receiver<WindowRequestResult> {
+        let (tx, rx) = mpsc::channel();
+        self.senders.lock().unwrap().insert(request_id, tx);
+        rx
+    }
+
+    /// 回执一个请求（主线程调用）。
+    pub fn resolve(&self, result: WindowRequestResult) {
+        let sender = self.senders.lock().unwrap().remove(&result.request_id);
+        if let Some(sender) = sender {
+            let _ = sender.send(result);
+        }
+    }
+
+    /// 丢掉一个请求（超时后清理）。
+    pub fn forget(&self, request_id: u64) {
+        self.senders.lock().unwrap().remove(&request_id);
+    }
+}
+
+/// 当前打开的插件窗口（登记在册，供路由与停用清理用）。
+///
+/// **只有主线程写**（窗口请求与关闭事件都发生在主线程），其它线程只读。
+#[derive(Default)]
+pub struct PluginWindows {
+    inner: std::sync::Mutex<Vec<OpenWindow>>,
+    /// 窗口序号：全局自增，保证标签不重复。
+    next_slot: AtomicU64,
+}
+
+impl PluginWindows {
+    /// 分配一个序号并登记一个窗口，返回登记结果。
+    pub fn open(
+        &self,
+        plugin_id: &str,
+        plugin_window_id: &str,
+        title: &str,
+        page: &str,
+    ) -> OpenWindow {
+        let slot = self.next_slot.fetch_add(1, Ordering::SeqCst) as u32 + 1;
+        let window = OpenWindow {
+            label: crate::plugin_window::plugin_window_label(plugin_id, slot),
+            plugin_window_id: plugin_window_id.to_string(),
+            plugin_id: plugin_id.to_string(),
+            page: page.to_string(),
+            title: title.to_string(),
+            opened_at_ms: now_ms(),
+        };
+        self.inner.lock().unwrap().push(window.clone());
+        window
+    }
+
+    /// 按标签取一个窗口。
+    pub fn by_label(&self, label: &str) -> Option<OpenWindow> {
+        self.inner
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|window| window.label == label)
+            .cloned()
+    }
+
+    /// 按「插件 + 插件侧窗口 id」取一个窗口。
+    pub fn by_plugin_window_id(&self, plugin_id: &str, window_id: &str) -> Option<OpenWindow> {
+        self.inner
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|window| window.plugin_id == plugin_id && window.plugin_window_id == window_id)
+            .cloned()
+    }
+
+    /// 摘掉一个窗口，返回它（没有则 `None`）。
+    pub fn remove(&self, label: &str) -> Option<OpenWindow> {
+        let mut windows = self.inner.lock().unwrap();
+        let index = windows.iter().position(|window| window.label == label)?;
+        Some(windows.remove(index))
+    }
+
+    /// 摘掉某个插件的**全部**窗口（停用/重载插件时用）。
+    pub fn remove_all_of(&self, plugin_id: &str) -> Vec<OpenWindow> {
+        let mut windows = self.inner.lock().unwrap();
+        let taken: Vec<OpenWindow> = windows
+            .iter()
+            .filter(|window| window.plugin_id == plugin_id)
+            .cloned()
+            .collect();
+        windows.retain(|window| window.plugin_id != plugin_id);
+        taken
+    }
+
+    /// 当前窗口标签（诊断用；单测拿它断言登记表的行为）。
+    ///
+    /// `cfg_attr`：lib target 里没有测试代码，clippy 会把「只有测试用」当成死代码；
+    /// 测试构建下则照常检查（所以它不会真的腐烂）。
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "只在单测里用到：登记表的行为由测试钉住")
+    )]
+    pub fn labels(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|window| window.label.clone())
+            .collect()
+    }
+
+    /// 是否一个窗口都没有。
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "只在单测里用到：登记表的行为由测试钉住")
+    )]
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().unwrap().is_empty()
+    }
+}
+
+/// 当前时间（epoch 毫秒）。
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// GUI 侧插件宿主。
@@ -232,6 +401,226 @@ impl TauriPluginHost {
     }
 }
 
+impl TauriPluginHost {
+    /// 按插件侧窗口 id 找到宿主登记的窗口（进程内所有插件共用一个表，所以按 id 找即可）。
+    fn window_by_plugin_id(&self, window_id: &str) -> Option<OpenWindow> {
+        self.app
+            .try_state::<Arc<PluginWindows>>()
+            .and_then(|windows| windows.by_plugin_window_id(&self.meta.id, window_id))
+    }
+
+    /// 把一条窗口事件交给插件线程的回调（走 `PluginCommand`）。
+    fn deliver_notice(&self, notice: WindowNotice) -> Result<(), PluginError> {
+        let Some(manager) = self.app.try_state::<PluginManager>() else {
+            return Err(PluginError::Failed("插件管理器不可用".to_string()));
+        };
+        manager
+            .deliver_window_notice(&self.meta.id, notice)
+            .map_err(PluginError::Failed)
+    }
+
+    /// 把一条窗口请求送到主线程执行，并等回执。
+    ///
+    /// 与 [`TauriPluginHost::request_tray`] 的区别只有「谁在主线程上干活」：
+    /// 窗口要建要拆，只能主线程做；超时上限也更宽一点。
+    fn request_window(&self, request: WindowRequest) -> Result<(String, u32), PluginError> {
+        let request_id = self.next_request.fetch_add(1, Ordering::SeqCst);
+        let pending = self
+            .app
+            .state::<Arc<PendingWindowRequests>>()
+            .inner()
+            .clone();
+
+        let rx = pending.register(request_id);
+        let message = WindowRequestMessage {
+            request_id,
+            plugin_id: self.meta.id.clone(),
+            request,
+        };
+
+        self.app
+            .emit(WINDOW_REQUEST_EVENT, message)
+            .map_err(|err| PluginError::Failed(format!("窗口请求发送失败：{err}")))?;
+
+        match rx.recv_timeout(Duration::from_millis(WINDOW_TIMEOUT_MS)) {
+            Ok(result) => match result.outcome {
+                // 关窗的回执没有标签，插件侧也不需要
+                Ok(Some((label, seq))) => Ok((label, seq)),
+                Ok(None) => Ok((String::new(), 0)),
+                Err(err) => Err(err),
+            },
+            Err(_) => {
+                pending.forget(request_id);
+                Err(PluginError::Failed(
+                    "窗口操作超时（应用主线程没有响应）".to_string(),
+                ))
+            }
+        }
+    }
+}
+
+/// 在主线程上装好窗口请求的处理者（与 `tray::setup_plugin_events` 同一个手法）。
+///
+/// **主线程上绝不能同步等**：这条事件的处理器本身就在主线程运行，它若阻塞自己，
+/// 就没人来处理这条事件了（必然死锁）。所以这里只做「建窗 / 拆窗 + 回执」。
+pub fn setup_window_events(app: &AppHandle) {
+    use tauri::Listener;
+
+    let handle = app.clone();
+    app.listen(WINDOW_REQUEST_EVENT, move |event| {
+        let payload = event.payload();
+        let Ok(message) = serde_json::from_str::<WindowRequestMessage>(payload) else {
+            log::warn!("收到无法解析的窗口请求：{payload}");
+            return;
+        };
+        let _ = handle_window_request(&handle, message);
+    });
+}
+
+/// 处理一次窗口请求（**主线程**上调用）。
+///
+/// 建窗这一步只登记 + 建出真正的 webview 窗口；页面里的内容由前端 relay 决定，
+/// 所以这里不需要知道插件页面长什么样。
+pub fn handle_window_request(app: &AppHandle, message: WindowRequestMessage) -> WindowResponse {
+    let pending = app.state::<Arc<PendingWindowRequests>>().inner().clone();
+    let windows = app.state::<Arc<PluginWindows>>().inner().clone();
+
+    let outcome = match &message.request {
+        WindowRequest::Open { window_id, options } => {
+            open_window(app, &windows, &message.plugin_id, window_id, options)
+        }
+        WindowRequest::Close { window_id } => {
+            close_plugin_window(app, &windows, &message.plugin_id, window_id)
+        }
+    };
+
+    let response = WindowResponse {
+        request_id: message.request_id,
+        outcome,
+    };
+    pending.resolve(WindowRequestResult {
+        request_id: response.request_id,
+        outcome: response.outcome.clone(),
+    });
+    response
+}
+
+/// 建一个插件窗口。
+fn open_window(
+    app: &AppHandle,
+    windows: &PluginWindows,
+    plugin_id: &str,
+    plugin_window_id: &str,
+    options: &clipbeam_plugins::WindowOptions,
+) -> Result<Option<(String, u32)>, PluginError> {
+    // 插件名用于缺省标题
+    let plugin_name = app
+        .try_state::<PluginManager>()
+        .map(|manager| {
+            manager
+                .list()
+                .into_iter()
+                .find(|info| info.id == plugin_id)
+                .map(|info| info.name)
+                .unwrap_or_else(|| plugin_id.to_string())
+        })
+        .unwrap_or_else(|| plugin_id.to_string());
+
+    let planned = crate::plugin_window::plan_window(
+        &WindowRequest::Open {
+            window_id: plugin_window_id.to_string(),
+            options: options.clone(),
+        },
+        &plugin_name,
+    )?;
+
+    let crate::plugin_window::PlannedWindowAction::Open { window_id, config } = planned else {
+        unreachable!("这里只可能是 Open");
+    };
+
+    // 先确认页面真的在插件目录里：否则窗口会打开成一片空白，
+    // 而原因只出现在 webview 的 404 里 —— 插件作者看不到。
+    let plugin_dir = app
+        .try_state::<PluginManager>()
+        .and_then(|manager| manager.plugin_dir(plugin_id));
+    let Some(plugin_dir) = plugin_dir else {
+        return Err(PluginError::Failed(format!(
+            "找不到插件 {plugin_id:?} 的目录"
+        )));
+    };
+    crate::plugin_window::resolve_plugin_file(&plugin_dir, &config.page)
+        .map_err(PluginError::InvalidArgument)?;
+
+    let window = windows.open(plugin_id, &window_id, &config.title, &config.page);
+    let slot = window
+        .label
+        .rsplit('-')
+        .next()
+        .and_then(|text| text.parse::<u32>().ok())
+        .unwrap_or(0);
+
+    if let Err(err) = build_webview_window(app, &window, &config) {
+        // 建失败要立刻把登记撤掉，否则会留下一个「在册但不存在」的窗口
+        windows.remove(&window.label);
+        return Err(PluginError::Failed(format!("创建窗口失败：{err}")));
+    }
+
+    log::info!(
+        "插件 {plugin_id} 打开了窗口 {}（页面 {}）",
+        window.label,
+        config.page
+    );
+    Ok(Some((window.label, slot)))
+}
+
+/// 关一个插件窗口；返回 `Ok(None)` 表示「本来就不在」（幂等）。
+fn close_plugin_window(
+    app: &AppHandle,
+    windows: &PluginWindows,
+    plugin_id: &str,
+    plugin_window_id: &str,
+) -> Result<Option<(String, u32)>, PluginError> {
+    let Some(window) = windows.by_plugin_window_id(plugin_id, plugin_window_id) else {
+        // 幂等：插件可能在页面已经关掉之后才调 close
+        return Ok(None);
+    };
+
+    if let Some(webview) = app.get_webview_window(&window.label) {
+        let _ = webview.close();
+    }
+    windows.remove(&window.label);
+    Ok(None)
+}
+
+/// 在**主线程**上建出 Tauri 窗口。
+///
+/// 窗口加载的是**应用自己的**一个路由（`index.html#/plugin-window?...`），
+/// 而不是插件页面本身 —— 那个路由再把插件页面放进沙箱 iframe（见 `plugin_window.rs`）。
+/// 这条链路让插件页面拿不到宿主的 IPC。
+fn build_webview_window(
+    app: &AppHandle,
+    window: &OpenWindow,
+    config: &crate::plugin_window::WindowConfig,
+) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    let url = crate::plugin_window::window_route_for(window);
+    let mut builder = WebviewWindowBuilder::new(app, &window.label, WebviewUrl::App(url.into()))
+        .title(&config.title)
+        .inner_size(config.size.width as f64, config.size.height as f64)
+        .resizable(config.resizable)
+        .always_on_top(config.always_on_top)
+        .decorations(config.decorations)
+        .transparent(config.transparent);
+
+    // `center()` 是「居中」这个动作本身，不接受布尔参数；插件没要求时就交给系统摆放
+    if config.center {
+        builder = builder.center();
+    }
+
+    builder.build().map(|_| ()).map_err(|err| err.to_string())
+}
+
 impl PluginHost for TauriPluginHost {
     fn meta(&self) -> &PluginMeta {
         &self.meta
@@ -287,6 +676,48 @@ impl PluginHost for TauriPluginHost {
             return Err(PluginError::Stopped);
         }
         self.request_tray(request)
+    }
+
+    fn window(&self, request: WindowRequest) -> Result<(String, u32), PluginError> {
+        if self.stopped() {
+            return Err(PluginError::Stopped);
+        }
+        self.request_window(request)
+    }
+
+    /// 把一个窗口事件交给插件线程上的回调。
+    ///
+    /// 两个方向共用这一个方法：
+    ///
+    /// * **页面 → 插件**：把消息交给插件登记的回调（`window:<id>:message`）；
+    /// * **插件 → 页面**：本方法收到的是 `WindowNotice::Message`，它其实是**发给页面**的，
+    ///   所以这里要按方向分派 —— 见下面的分支。
+    fn notify_window_event(&self, notice: WindowNotice) -> Result<(), PluginError> {
+        if self.stopped() {
+            return Err(PluginError::Stopped);
+        }
+
+        match &notice {
+            // 插件 → 页面：直接 emit 给那个窗口；窗口不在了就当作已关闭
+            WindowNotice::Message { window_id, message } => {
+                let Some(window) = self.window_by_plugin_id(window_id) else {
+                    return Err(PluginError::Failed(format!(
+                        "窗口 {window_id:?} 已经不在（可能已关闭）"
+                    )));
+                };
+                self.app
+                    .emit_to(&window.label, "plugin-window-message", message.clone())
+                    .map_err(|err| {
+                        // 窗口没了：告诉插件它已经关了 —— 这是插件清理回调的唯一时机
+                        let _ = self.deliver_notice(WindowNotice::Closed {
+                            window_id: window_id.clone(),
+                        });
+                        PluginError::Failed(format!("窗口已关闭（{err}）"))
+                    })
+            }
+            // 宿主 → 插件：交给插件线程的回调
+            WindowNotice::Closed { .. } => self.deliver_notice(notice),
+        }
     }
 
     fn stopped(&self) -> bool {
@@ -487,6 +918,57 @@ mod tests {
             map_custom_labels(&MessageDialogResult::Cancel, &labels),
             DialogChoice::Dismissed
         );
+    }
+
+    /// 窗口登记表：标签可预测、按插件能整批摘掉、id 不重复。
+    ///
+    /// 这张表是「页面发来的消息该给谁」的唯一依据，所以它的行为要钉住。
+    #[test]
+    fn window_registry_tracks_labels_and_owners() {
+        let windows = PluginWindows::default();
+        assert!(windows.is_empty());
+
+        let first = windows.open("plugin-a", "w1", "面板", "index.html");
+        let second = windows.open("plugin-a", "w2", "面板 2", "ui/panel.html");
+        let other = windows.open("plugin-b", "w1", "别的", "index.html");
+
+        // 标签形如 plugin-window-<插件 id>-<序号>，且全局唯一
+        assert_eq!(first.label, "plugin-window-plugin-a-1");
+        assert_eq!(second.label, "plugin-window-plugin-a-2");
+        assert_eq!(other.label, "plugin-window-plugin-b-3");
+        assert_eq!(windows.labels().len(), 3, "三个窗口都该在册");
+
+        // 两种查找方式
+        assert_eq!(
+            windows.by_label("plugin-window-plugin-a-2").unwrap().page,
+            "ui/panel.html"
+        );
+        assert_eq!(
+            windows.by_plugin_window_id("plugin-a", "w2").unwrap().label,
+            "plugin-window-plugin-a-2"
+        );
+        assert!(windows.by_label("nope").is_none());
+        assert!(
+            windows.by_plugin_window_id("plugin-b", "w2").is_none(),
+            "不同插件的同名窗口 id 不该互相命中"
+        );
+
+        // 整批摘掉某个插件的窗口：另一个插件不受影响
+        let taken = windows.remove_all_of("plugin-a");
+        assert_eq!(taken.len(), 2);
+        assert_eq!(
+            windows.labels(),
+            vec!["plugin-window-plugin-b-3".to_string()]
+        );
+        assert!(
+            windows.remove_all_of("plugin-a").is_empty(),
+            "再摘一次应当是空的（幂等）"
+        );
+
+        // 单个摘除
+        assert!(windows.remove("plugin-window-plugin-b-3").is_some());
+        assert!(windows.remove("plugin-window-plugin-b-3").is_none());
+        assert!(windows.is_empty());
     }
 
     #[test]

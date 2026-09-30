@@ -68,6 +68,8 @@ pub enum Command {
 ///
 /// 与 GUI 的唯一区别就是宿主实现:这里 `$.type_str` 写终端、`$.confirm` 读 stdin。
 fn run_cli_script(path: &std::path::Path, raw: bool, token: &cancel::CancellationToken) {
+    // 命令行用户也在同一个脚本目录里写 `.ts`，所以类型文件同样要刷新
+    refresh_editor_types();
     // 首次运行顺带把内置示例落到脚本目录,方便用户照抄
     match clipbeam_scripting::scripts::ensure_seed_scripts() {
         Ok(0) => {}
@@ -138,6 +140,31 @@ fn run_cli_script(path: &std::path::Path, raw: bool, token: &cancel::Cancellatio
             );
             std::process::exit(1);
         }
+    }
+}
+
+/// 把脚本与插件目录里的类型声明、编辑器配置刷新一遍。
+///
+/// 覆盖写（不是「已存在就跳过」）：这些文件是这份二进制**对外契约的类型侧表示**，
+/// 与运行期不一致就会让编辑器提示一个不存在的 API 表。
+/// 用户真正要写的是 `.ts` 脚本/插件本身，那些不会被碰。
+///
+/// 失败只记日志：类型提示是辅助，不该拦住应用启动。
+pub fn refresh_editor_types() {
+    match clipbeam_scripting::declarations::ensure_declarations() {
+        Ok(n) => log::debug!(
+            "已刷新 {n} 个脚本目录类型文件（{}）",
+            clipbeam_scripting::scripts::scripts_dir().display()
+        ),
+        Err(e) => log::warn!("刷新脚本目录类型文件失败: {e}"),
+    }
+
+    match clipbeam_plugins::declarations::ensure_declarations() {
+        Ok(n) => log::debug!(
+            "已刷新 {n} 个插件目录类型文件（{}）",
+            clipbeam_plugins::catalog::plugins_dir_display()
+        ),
+        Err(e) => log::warn!("刷新插件目录类型文件失败: {e}"),
     }
 }
 
@@ -285,6 +312,10 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // 脚本 $.confirm 用系统原生确认框(见 scripting.rs)
         .plugin(tauri_plugin_dialog::init())
+        // 插件页面与静态资源：clipbeam-plugin://localhost/p-<插件 id>/<文件>
+        .register_uri_scheme_protocol(plugin_window::PLUGIN_PROTOCOL, |_ctx, request| {
+            plugin_window::protocol_response(request)
+        })
         .setup(|app| {
             // macOS: 托盘常驻模式,不占 Dock(Tauri 默认是 Regular 策略)
             #[cfg(target_os = "macos")]
@@ -309,6 +340,9 @@ pub fn run() {
                 ),
                 Err(e) => log::warn!("初始化插件目录失败: {e}"),
             }
+            // 类型声明与编辑器配置:每次启动都覆盖(它们是随二进制走的产物,
+            // 必须与运行期一致)。有了它们,用户目录里的 .ts 脚本/插件在编辑器里才有提示。
+            refresh_editor_types();
 
             // 插件管理器先建起来:托盘菜单要按插件清单组装,所以必须在 build 之前
             let manager = plugin_manager::PluginManager::new(app.handle().clone());
@@ -320,10 +354,17 @@ pub fn run() {
             app.manage(std::sync::Arc::new(
                 plugin_host::PendingTrayRequests::default(),
             ));
+            // 窗口相关：登记表 + 待回执的请求（两者都只在主线程写）
+            app.manage(std::sync::Arc::new(plugin_host::PluginWindows::default()));
+            app.manage(std::sync::Arc::new(
+                plugin_host::PendingWindowRequests::default(),
+            ));
 
             tray::build(app, &cfg, &plugin_menus)?;
             // 托盘运行时请求(插件的 $plugin.tray.*)必须在主线程上执行
             tray::setup_plugin_events(app.handle());
+            // 窗口请求(插件的 $plugin.window.*)同理：建窗/拆窗只能主线程做
+            plugin_host::setup_window_events(app.handle());
 
             // 启动时为空闲模式:仅注册发送/接收热键,Esc 不拦截
             hotkey::set_mode(app.handle(), &cfg, hotkey::HotkeyMode::Idle)?;
@@ -423,6 +464,13 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            // 插件窗口走正常的关闭流程（真关闭，不是隐藏到托盘）：
+            // 它是插件自己开出来的一次性界面，藏起来只会变成看不见的僵尸窗口。
+            // 销毁后由 frontend 的 unload 与窗口请求两条路收拾登记表。
+            if plugin_window::is_plugin_window(window.label()) {
+                return;
+            }
+
             // 关闭按钮 → 隐藏到托盘(不退出)
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -467,6 +515,9 @@ pub fn run() {
             plugin_commands::plugins_info,
             plugin_commands::get_plugin_console,
             plugin_commands::clear_plugin_console,
+            // 插件窗口（前端 relay 用）
+            plugin_commands::plugin_window_message,
+            plugin_commands::plugin_window_closed,
         ])
         .build(tauri::generate_context!())
         .expect("Tauri 应用构建失败")

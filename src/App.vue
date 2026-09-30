@@ -13,7 +13,18 @@ const currentPath = ref(route.path)
 // 按**窗口 label**（而不是路由）决定布局：进度/待命是纯独立窗口；
 // 主窗口与脚本窗口都用 aside 侧边栏布局。
 const windowLabel = getCurrentWindow().label
-const bareWindow = computed(() => windowLabel === 'progress' || windowLabel === 'standby')
+/**
+ * 裸窗：整页就是它自己，没有侧边栏/页头。
+ *
+ * 三类：进度与待命是浮动小窗；插件窗口（标签形如 `plugin-window-*`）整页交给插件的
+ * 沙箱 iframe，多一层侧边栏只会占地方。
+ */
+const bareWindow = computed(
+  () =>
+    windowLabel === 'progress'
+    || windowLabel === 'standby'
+    || windowLabel.startsWith('plugin-window-'),
+)
 
 router.afterEach((to) => {
   currentPath.value = to.path

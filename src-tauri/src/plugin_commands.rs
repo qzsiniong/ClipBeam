@@ -7,7 +7,8 @@
 //! **把错误原样返回给界面**（而不是只写日志 —— 用户在界面上点了开关，必须看到结果）。
 
 use clipbeam_plugins::catalog;
-use tauri::{AppHandle, State};
+use clipbeam_plugins::WindowNotice;
+use tauri::{AppHandle, Manager, State};
 
 use crate::console_panel::ConsoleLine;
 use crate::plugin_manager::{PluginInfo, PluginManager};
@@ -95,4 +96,80 @@ pub async fn clear_plugin_console(
 ) -> Result<(), String> {
     state.clear_console(&id);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 插件窗口（前端 relay 用）
+// ---------------------------------------------------------------------------
+
+/// 插件窗口里的页面发来一条消息（前端 relay 转过来）。
+///
+/// 三件事：按窗口标签找到**是哪个插件的哪个窗口** → 交给那个插件的线程 →
+/// 由它唤醒插件用 `$plugin.window.onMessage` 登记的回调。
+#[tauri::command]
+pub async fn plugin_window_message(
+    app: AppHandle,
+    label: String,
+    message: serde_json::Value,
+) -> Result<(), String> {
+    let window = lookup_window(&app, &label)?;
+
+    let manager = app
+        .try_state::<PluginManager>()
+        .ok_or_else(|| "插件管理器不可用".to_string())?;
+
+    manager.deliver_window_notice(
+        &window.plugin_id,
+        WindowNotice::Message {
+            window_id: window.plugin_window_id,
+            message,
+        },
+    )
+}
+
+/// 插件窗口已经关闭（前端 `beforeunload` 转过来，或用户关窗后由它转过来）。
+///
+/// 顺手把登记表里的那一条摘掉：窗口没了，宿主不该再往那儿发消息。
+/// 摘不到（已经摘过）也返回成功 —— 这个命令是**幂等**的，
+/// 因为它有两条触发路径（页面 unload、Rust 侧主动关窗）。
+#[tauri::command]
+pub async fn plugin_window_closed(app: AppHandle, label: String) -> Result<(), String> {
+    let Some(windows) = windows_of(&app) else {
+        return Ok(());
+    };
+
+    let Some(window) = windows.remove(&label) else {
+        return Ok(());
+    };
+
+    // 插件可能已经停用（那时线程没了，投递会失败）：这是正常的收尾顺序，不当错误
+    if let Some(manager) = app.try_state::<PluginManager>() {
+        if let Err(err) = manager.deliver_window_notice(
+            &window.plugin_id,
+            WindowNotice::Closed {
+                window_id: window.plugin_window_id.clone(),
+            },
+        ) {
+            log::debug!(
+                "窗口 {label} 关闭后通知插件 {} 失败（多半是插件已停用）：{err}",
+                window.plugin_id
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// 取窗口登记表。
+fn windows_of(app: &AppHandle) -> Option<std::sync::Arc<crate::plugin_host::PluginWindows>> {
+    app.try_state::<std::sync::Arc<crate::plugin_host::PluginWindows>>()
+        .map(|state| state.inner().clone())
+}
+
+/// 按窗口标签找到它对应的登记项。
+fn lookup_window(app: &AppHandle, label: &str) -> Result<crate::plugin_window::OpenWindow, String> {
+    windows_of(app)
+        .ok_or_else(|| "窗口登记表不可用".to_string())?
+        .by_label(label)
+        .ok_or_else(|| format!("没有登记这个窗口：{label}（可能已经关闭）"))
 }
