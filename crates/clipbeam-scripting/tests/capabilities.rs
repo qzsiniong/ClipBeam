@@ -1408,11 +1408,11 @@ async fn pack_and_shard_seed_script_runs_end_to_end() {
     assert!(
         restore_body
             .chars()
-            .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c) || c == '\n'),
-        "还原脚本负载应当只有 base32 小写盘表（无填充）与换行：{restore_body}"
+            .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c) || c == '\n' || c == '='),
+        "还原脚本负载应当只有 base32 小写、带 = 填充与换行：{restore_body}"
     );
     let decoded_script = String::from_utf8(
-        data_encoding::BASE32_NOPAD
+        data_encoding::BASE32
             .decode(
                 restore_body
                     .split_whitespace()
@@ -1633,7 +1633,7 @@ fn methods_declared_in_spec() -> Vec<String> {
 #[test]
 fn extensions_are_listed() {
     let extensions = extensions();
-    assert_eq!(extensions.len(), 15, "应当有 15 个使用方扩展");
+    assert_eq!(extensions.len(), 16, "应当有 16 个使用方扩展");
 
     let names: Vec<String> = extensions
         .iter()
@@ -1656,7 +1656,7 @@ fn extensions_are_listed() {
 fn runtime_options_helper_has_all_extensions() {
     let console: Arc<dyn ConsoleHook> = Arc::new(StdoutConsole);
     let options = runtime_options(Arc::new(TestHost::default()), console);
-    assert_eq!(options.extensions.len(), 15);
+    assert_eq!(options.extensions.len(), 16);
     assert!(options.prepare.is_some(), "宿主应当通过 prepare 钩子注入");
     assert_eq!(
         options.namespace.as_deref(),
