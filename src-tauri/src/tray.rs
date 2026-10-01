@@ -22,6 +22,7 @@ pub const M_SEND: &str = "send";
 pub const M_RECV: &str = "recv";
 pub const M_DEPLOY_TYPE: &str = "deploy_type";
 pub const M_DEPLOY_COPY: &str = "deploy_copy";
+pub const M_SEND_FILE: &str = "send_file";
 pub const M_SCRIPTS: &str = "scripts";
 pub const M_SETTINGS: &str = "settings";
 pub const M_QUIT: &str = "quit";
@@ -215,6 +216,7 @@ fn assemble_menu(
         &items.deploy_type,
         &separators[3],
         &items.deploy_copy,
+        &items.send_file,
         &items.scripts,
         &items.settings,
     ];
@@ -238,6 +240,8 @@ pub struct TrayItems {
     pub deploy_copy: IconMenuItem<Wry>,
     pub scripts: IconMenuItem<Wry>,
     pub settings: IconMenuItem<Wry>,
+    /// 「发送文件」：与其它执行类菜单项一起随忙闲启停。
+    pub send_file: IconMenuItem<Wry>,
 }
 
 impl TrayItems {
@@ -270,6 +274,11 @@ impl TrayItems {
         let scripts = IconMenuItemBuilder::with_id(M_SCRIPTS, "运行脚本…")
             .icon(icon_scripts())
             .build(app)?;
+        // 文件传输走脚本引擎（`04-file-transfer.ts`），所以文案里点明它是脚本通道。
+        // 时长取决于文件大小与分片大小，不写死分钟数（会随改动漂移）。
+        let send_file = IconMenuItemBuilder::with_id(M_SEND_FILE, "发送文件到远程(键盘通道)")
+            .icon(icon_send())
+            .build(app)?;
         let settings = IconMenuItemBuilder::with_id(M_SETTINGS, "设置…")
             .icon(icon_settings())
             .build(app)?;
@@ -283,6 +292,7 @@ impl TrayItems {
             deploy_copy,
             scripts,
             settings,
+            send_file,
         })
     }
 }
@@ -430,6 +440,7 @@ pub fn set_busy(app: &AppHandle, busy: bool, status: &str) -> tauri::Result<()> 
     items.send.set_enabled(!busy)?;
     items.recv.set_enabled(!busy)?;
     items.deploy_type.set_enabled(!busy)?;
+    items.send_file.set_enabled(!busy)?;
     items.status.set_text(status)?;
     // 恢复默认图标(空闲)
     if !busy {

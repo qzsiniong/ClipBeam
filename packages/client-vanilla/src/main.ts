@@ -1,13 +1,22 @@
 import type { ReceiverStatusClass } from '@clipbeam/shared'
 import {
+  buildFeedbackFrame,
   buildFrames,
   clamp,
   createReceiver,
+  createTransferSession,
   createTypedDisplay,
+  DEBUG,
   readClipboard,
   writeClipboard,
 } from '@clipbeam/shared'
 import QrCreator from 'qr-creator'
+
+// 一行即可确认调试开关是否生效（开关本身见 @clipbeam/shared 的 debug 模块）
+if (DEBUG) {
+  // eslint-disable-next-line no-console -- 调试开关的确认行，本身就要求输出
+  console.debug('[clipbeam:page] 调试输出已开启（localStorage clipbeam-debug / URL #debug）')
+}
 
 function $(id: string): HTMLElement {
   return document.getElementById(id) as HTMLElement
@@ -100,8 +109,71 @@ const receiver = createReceiver({
   onText: writeRemoteClipboard,
 })
 
-window.addEventListener('keydown', e => receiver.handle(e), true)
-setInterval(() => receiver.checkTimeout(), 500)
+/* ================= 文件接收（协议 D，与协议 A 共用同一条按键流） ============ */
+
+const fbStatus = $('fbStatus')
+const fbBar = $('fbBar')
+const fbQrBox = $('fbQr')
+
+function setFb(cls: ReceiverStatusClass, msg: string) {
+  fbStatus.className = `status ${cls}`
+  fbStatus.textContent = msg
+}
+
+/** 反馈二维码：固定在右下角，宿主脚本用 `$.scan_qr()` 读它。 */
+function renderFbQr(text: string) {
+  fbQrBox.innerHTML = ''
+  QrCreator.render({ text, ecLevel: 'M', size: 300, radius: 0 }, fbQrBox)
+}
+
+const transfer = createTransferSession({
+  onStatus: setFb,
+  onProgress: (got, total) => {
+    fbBar.style.display = total > 0 ? 'block' : 'none'
+    // 进度条用同一个 .bar 结构（内层 <i> 的宽度即进度）
+    const inner = fbBar.firstElementChild as HTMLElement | null
+    if (inner && total > 0)
+      inner.style.width = `${Math.round((got / total) * 100)}%`
+  },
+  onQr: renderFbQr,
+})
+
+// 首屏就渲染一张 UNAUTH，让宿主机一进来就能读到「还没授权」
+renderFbQr(buildFeedbackFrame({ type: 'feedback', status: 'unauthorized' }))
+
+$('dirBtn').addEventListener('click', () => {
+  void transfer.pickDirectory()
+})
+
+/**
+ * 同一条 keydown 流分派给两条通道。
+ *
+ * 先给文件通道（`kbb`/`kbc`），它不认再交给文本通道（`kba`）。两者靠 magic 区分：
+ * v2 里两类帧都以 `0` 开头，靠 **magic** 在第 4 个字符分岔：
+ * 文本是 `0kba`，文件是 `0kbb`/`0kbc`。所以两边各自校验前缀、各自复位 ——
+ * 文件通道认出 `0kba` 就放手，文本通道认出 `0kbb`/`0kbc` 也放手。
+ */
+window.addEventListener('keydown', (e) => {
+  if (e.repeat)
+    return
+  const target = e.target as HTMLElement | null
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable))
+    return
+
+  // 单字符键才算数据（修饰键 / 方向键的 e.key 是多字符名）
+  if (e.key.length === 1) {
+    const consumed = transfer.accept(e.key)
+    if (consumed)
+      e.preventDefault()
+    // 无论文件通道是否接手，都继续喂给文本通道：它要靠前 4 个字符
+    // （`0kba` vs `0kbb`/`0kbc`）自己判定，认不出就复位，不会误收。
+  }
+  receiver.handle(e)
+}, true)
+setInterval(() => {
+  receiver.checkTimeout()
+  transfer.checkTimeout()
+}, 500)
 
 $('copyBtn').addEventListener('click', () => {
   manualCopy.select()

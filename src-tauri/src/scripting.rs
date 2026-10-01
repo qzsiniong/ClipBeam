@@ -339,6 +339,23 @@ impl ScriptHost for TauriScriptHost {
         self.emit_progress(typed, total, "");
     }
 
+    /// `$.scan_qr`：抓一遍所有显示器，返回第一条能解出来的二维码文本。
+    ///
+    /// **只抓一次**——轮询节奏由脚本用 `await sleep()` 自己排（只有脚本作者知道该等多久）。
+    /// 抓取与解码走协议 B 共用的 [`crate::capture`]，两条路径的可见行为一致：
+    /// 同一张二维码在哪个通道都得能解出来。
+    ///
+    /// 扫描开始前先查取消令牌：一次抓屏 + 解码在慢机器上可能上百毫秒，脚本按
+    /// `pollMs` 轮询时这个检查让 Esc 的中断延迟保持在一个轮询周期内。
+    fn scan_qr(&self) -> Result<Option<String>, HostError> {
+        if self.cancel.is_cancelled() {
+            return Err(HostError::Cancelled);
+        }
+        Ok(crate::capture::grab_all_gray()
+            .into_iter()
+            .find_map(crate::capture::decode_qr_text))
+    }
+
     fn cancelled(&self) -> bool {
         self.cancel.is_cancelled()
     }

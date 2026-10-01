@@ -71,6 +71,66 @@ pub async fn deploy_copy() -> Result<usize, String> {
     Ok(crate::deploy::sizes().0)
 }
 
+/// 弹系统原生文件选择框，返回所选文件的绝对路径（取消时 `None`）。
+///
+/// 供托盘与仪表盘的「发送文件」共用：先选文件，再 `start_file_transfer`。
+#[tauri::command]
+pub async fn pick_file_to_send(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("选择要通过键盘通道发送的文件")
+        .blocking_pick_file();
+
+    match picked {
+        Some(path) => path
+            .into_path()
+            .map(|p| Some(p.to_string_lossy().into_owned()))
+            .map_err(|e| format!("所选路径不可用：{e}")),
+        None => Ok(None),
+    }
+}
+
+/// 运行一次文件传输（协议 D）：生成内嵌该路径的传输脚本并交给脚本引擎执行。
+///
+/// 为什么是「生成脚本」而不是写一个 Rust 版传输器：
+///
+/// * 协议、分片、压缩、重传、进度全在 `04-file-transfer.ts` 里，用户可读可改可复制；
+/// * 于是待命窗口、进度窗口、Esc 中止、Console 面板、焦点重确认**全部复用脚本任务那条链**，
+///   这里一行编排逻辑都不用重写。
+///
+/// 生成而**不落盘**：用户脚本目录里的 `04-file-transfer.ts` 是可编辑的示例，
+/// 我们不覆盖它（`ensure_seed_scripts` 的约定就是「已存在的文件永不覆盖」）。
+#[tauri::command]
+pub async fn start_file_transfer(
+    app: AppHandle,
+    state: State<'_, WorkerState>,
+    path: String,
+) -> Result<(), String> {
+    // 先校验路径：让用户在点下去的一瞬间就看到「文件不存在」，而不是等待命窗口之后
+    let fs_path = std::path::PathBuf::from(&path);
+    if !fs_path.is_file() {
+        return Err(format!("不是有效文件：{path}"));
+    }
+
+    let source = script_runner::transfer_script_with_path(&path)?;
+    let name = FILE_TRANSFER_SCRIPT.to_string();
+
+    state.set_pending_script(crate::worker::ScriptRequest { name, source });
+
+    // 启动失败（例如已有任务在跑）时把请求清掉：否则下一次脚本任务会取到残留内容
+    if let Err(e) = state.start(TaskKind::Script, app).await {
+        state.clear_pending_script();
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// 文件传输脚本的文件名（同时是转译器判断语法、错误信息里显示的标识）。
+pub const FILE_TRANSFER_SCRIPT: &str = "04-file-transfer.ts";
+
 /// 中止当前任务(如有)。
 #[tauri::command]
 pub async fn cancel_task(app: AppHandle, state: State<'_, WorkerState>) -> Result<(), String> {

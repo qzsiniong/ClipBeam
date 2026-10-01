@@ -110,19 +110,28 @@ fn seed_scripts_are_named_and_non_empty() {
 }
 
 /// 示例里的 TS 必须在进程内能转译成 JS（不需要 Node）。
+///
+/// 遍历**所有** `.ts` 示例，而不是只挑第一个：新增示例不该绕过这道守卫。
 #[test]
 fn seed_typescript_transpiles() {
-    let (name, source) = SEED_SCRIPTS
+    let ts_seeds: Vec<(&str, &str)> = SEED_SCRIPTS
         .iter()
-        .find(|(name, _)| name.ends_with(".ts"))
-        .expect("应当有一个 TS 示例");
+        .filter(|(name, _)| name.ends_with(".ts"))
+        .copied()
+        .collect();
+    assert!(!ts_seeds.is_empty(), "应当有 TS 示例");
 
-    let js = clipbeam_scripting::ts::transpile(source, std::path::Path::new(name))
-        .expect("示例 TS 应当能转译");
+    for (name, source) in ts_seeds {
+        let js = clipbeam_scripting::ts::transpile(source, std::path::Path::new(name))
+            .unwrap_or_else(|err| panic!("示例 {name} 应当能转译：{err}"));
 
-    assert!(!js.contains("interface "), "interface 应当被剥掉：\n{js}");
-    assert!(!js.contains("enum "), "enum 语法应当被转译：\n{js}");
-    assert!(js.contains("await"), "顶层 await 应当保留：\n{js}");
+        assert!(
+            !js.contains("interface "),
+            "{name}: interface 应当被剥掉：\n{js}"
+        );
+        assert!(!js.contains("enum "), "{name}: enum 语法应当被转译：\n{js}");
+        assert!(js.contains("await"), "{name}: 顶层 await 应当保留：\n{js}");
+    }
 }
 
 /// 示例里的 JS 语法必须成立（用引擎真跑一遍最小化版本会依赖文件与宿主，

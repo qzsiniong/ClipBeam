@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Separator } from '@/components/ui/separator'
 
 interface TaskOutcome { title: string, body: string }
-type TaskKind = 'send' | 'recv' | 'deploytype' | null
+type TaskKind = 'send' | 'recv' | 'deploytype' | 'script' | 'sendfile' | null
 
 const busy = ref(false)
 const kind = ref<TaskKind>(null)
@@ -74,6 +74,26 @@ async function deployCopy() {
       title: '✓ 已复制到剪贴板',
       body: `自解压接收页（${chars} 字符）已复制到宿主机剪贴板`,
     }
+  }
+  catch (e) {
+    lastError.value = String(e)
+  }
+}
+
+/**
+ * 发送文件到远程（协议 D）。
+ *
+ * 与托盘「发送文件」走**同一条**命令链：先在宿主机弹系统原生选择框，
+ * 再把所选路径嵌进文件传输脚本交给脚本引擎跑。前端不碰协议本身。
+ */
+async function startFileTransfer() {
+  lastError.value = null
+  lastOutcome.value = null
+  try {
+    const path = await invoke<string | null>('pick_file_to_send')
+    if (path === null)
+      return // 用户取消，不算错误
+    await invoke('start_file_transfer', { path })
   }
   catch (e) {
     lastError.value = String(e)
@@ -158,8 +178,12 @@ const statusText = computed(() => {
     send: '发送中',
     recv: '接收中',
     deploytype: '部署中',
+    // 文件传输与手工脚本都跑在脚本引擎上（同一个 TaskKind::Script），
+    // 按「脚本运行中」显示；`sendfile` 是保留位，便于将来区分。
+    script: '脚本运行中',
+    sendfile: '发送文件中',
   }
-  return kind.value ? labelMap[kind.value] : ''
+  return (kind.value && labelMap[kind.value]) || '运行中'
 })
 
 const statusVariant = computed(() => {
@@ -244,6 +268,9 @@ const speedUnit = computed(() => (kind.value === 'recv' ? '帧/秒' : '字符/�
         </Button>
         <Button :disabled="busy" @click="startRecv">
           截屏接收
+        </Button>
+        <Button :disabled="busy" variant="outline" @click="startFileTransfer">
+          发送文件到远程
         </Button>
         <Button :disabled="busy" variant="outline" @click="startDeployType">
           部署接收页(键盘)

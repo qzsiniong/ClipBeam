@@ -116,6 +116,6 @@ mod tests {
         );
         assert_eq!(parsed["compilerOptions"]["types"], serde_json::json!([]));
         assert_eq!(parsed["compilerOptions"]["noEmit"], serde_json::json!(true));
-        assert_eq!(parsed["include"], serde_json::json!(["*.ts", "*.d.ts"]));
+        assert_eq!(parsed["include"], serde_json::json!(["**/*.ts", "*.d.ts"]));
     }
 }

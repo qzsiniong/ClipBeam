@@ -20,7 +20,7 @@ pub const SCRIPT_EXTENSIONS: [&str; 6] = ["js", "mjs", "cjs", "ts", "mts", "cts"
 const MAX_NAME_CHARS: usize = 128;
 
 /// 内置示例：(文件名, 内容)。
-pub const SEED_SCRIPTS: [(&str, &str); 3] = [
+pub const SEED_SCRIPTS: [(&str, &str); 4] = [
     (
         "01-quick-start.js",
         include_str!("../seed/01-quick-start.js"),
@@ -30,7 +30,19 @@ pub const SEED_SCRIPTS: [(&str, &str); 3] = [
         "03-pack-and-shard.ts",
         include_str!("../seed/03-pack-and-shard.ts"),
     ),
+    (
+        "04-file-transfer.ts",
+        include_str!("../seed/04-file-transfer.ts"),
+    ),
 ];
+
+/// 文件传输脚本的源码（`04-file-transfer.ts`）。
+///
+/// 托盘/仪表盘的「发送文件」需要拿它**生成一份内嵌所选路径的变体**再运行 ——
+/// 而不是去改用户脚本目录里那份（那是可编辑的示例，`ensure_seed_scripts` 的约定是
+/// 「已存在的文件永不覆盖」）。放在这里是为了让「示例内容」只有 `include_str!` 一个出处，
+/// 避免 `src-tauri` 再写一遍路径、两处漂移。
+pub const TRANSFER_SEED: &str = include_str!("../seed/04-file-transfer.ts");
 
 /// 脚本目录：`<配置目录>/ClipBeam/scripts`。
 ///

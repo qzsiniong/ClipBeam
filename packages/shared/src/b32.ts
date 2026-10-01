@@ -38,6 +38,24 @@ export function b32EncodeUpper(bytes: Uint8Array | readonly number[]): string {
   return out
 }
 
+/** RFC4648 base32 无填充编码，输出**小写**（键盘通道用；字母表里没有 `0`/`1`）。 */
+export function b32EncodeLower(bytes: Uint8Array | readonly number[]): string {
+  let val = 0
+  let bits = 0
+  let out = ''
+  for (let i = 0; i < bytes.length; i++) {
+    val = (val << 8) | bytes[i]
+    bits += 8
+    while (bits >= 5) {
+      bits -= 5
+      out += B32[(val >>> bits) & 31]
+    }
+  }
+  if (bits > 0)
+    out += B32[((val << (5 - bits)) & 31)]
+  return out
+}
+
 /** 4 字节 CRC32 的 base32 摘要（7 字符大写）。 */
 export function crcB32(crc: number): string {
   const b = [(crc >>> 24) & 255, (crc >>> 16) & 255, (crc >>> 8) & 255, crc & 255]

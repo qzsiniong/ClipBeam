@@ -49,9 +49,18 @@ export default defineConfig({
     chunkSizeWarningLimit: 1 << 30,
     terserOptions: {
       compress: {
-        drop_console: true,
+        // 只丢弃 log/info/warn/error，**专门留下 `console.debug`**。
+        //
+        // 为什么：部署到远程的正是这份压缩产物（协议 C 内嵌 dist/index.html），
+        // 而接收页的调试输出走 `console.debug`（见 packages/shared/src/debug.ts）。
+        // 用 `drop_console: true` 会把包括 debug 在内的所有 console 调用一起删掉，
+        // 于是「在远程页面上打开调试」这件事根本不可能 —— 加了调用也看不见。
+        //
+        // 留下的 debug 默认不输出：它由 localStorage/URL 开关控制（默认关），
+        // 所以正常使用时控制台依然是干净的。
+        drop_console: ['log', 'info', 'warn', 'error'],
         drop_debugger: true,
-        pure_funcs: ['console.log', 'console.warn', 'console.error'],
+        pure_funcs: ['console.log', 'console.info', 'console.warn', 'console.error'],
         passes: 3,
         unsafe: true,
         reduce_vars: true,

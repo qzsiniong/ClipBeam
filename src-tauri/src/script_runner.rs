@@ -61,6 +61,36 @@ pub fn transpile_if_needed(name: &str, source: &str) -> Result<String, String> {
         .map_err(|err| err.to_string())
 }
 
+/// 生成「内嵌指定文件路径」的文件传输脚本，并转译成可执行的 JS。
+///
+/// 做的是文本替换而不是改写 AST：目标是一行**受我们控制**的常量声明，
+/// 校验「恰好出现一次」就足够安全 —— 找不到就报错，绝不悄悄跑一份错的脚本。
+///
+/// 为什么不把路径当参数传：脚本引擎目前没有参数通道（`run_source` 只有名字与源码），
+/// 而给引擎加一条参数机制会牵动两个 crate 的公开接口。替换一行常量对用户还更透明：
+/// 生成的脚本在 Console 面板里看得见它要发哪个文件。
+pub fn transfer_script_with_path(path: &str) -> Result<String, String> {
+    const PLACEHOLDER: &str = "const srcPath: string | null = null";
+
+    let template = clipbeam_scripting::scripts::TRANSFER_SEED;
+    let occurrences = template.matches(PLACEHOLDER).count();
+    if occurrences != 1 {
+        return Err(format!(
+            "文件传输脚本的模板有变化（预期 1 处 `{PLACEHOLDER}`，实际 {occurrences} 处）；\
+             请检查 crates/clipbeam-scripting/seed/04-file-transfer.ts"
+        ));
+    }
+
+    // 路径用 JSON 序列化：反斜杠、引号、中文都能安全塞进 TS 字符串字面量
+    let literal = serde_json::to_string(path).map_err(|e| format!("路径转义失败：{e}"))?;
+    let with_path = template.replace(
+        PLACEHOLDER,
+        &format!("const srcPath: string | null = {literal}"),
+    );
+
+    transpile_if_needed(crate::commands::FILE_TRANSFER_SCRIPT, &with_path)
+}
+
 /// 在引擎里执行一段脚本源码（宿主、console 落点与取消信号由调用方注入）。
 pub async fn run_source(
     name: &str,
@@ -101,4 +131,43 @@ pub fn describe_error(err: &str) -> String {
 pub fn engine_cancel(token: &WorkerCancel) -> CancelSignal {
     let flag = token.flag();
     CancelSignal::watching(move || flag.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 生成的传输脚本必须**内嵌**所选路径，且能转译。
+    ///
+    /// 这条测试同时守住模板的形态：`04-file-transfer.ts` 里那行占位常量一旦被改名，
+    /// 下面的 `expect` 会直接失败，而不是让托盘菜单在运行时才发现。
+    #[test]
+    fn transfer_script_embeds_the_chosen_path() {
+        let js = transfer_script_with_path("/tmp/季度报告 final.pdf")
+            .expect("应当能生成并转译文件传输脚本");
+
+        assert!(
+            js.contains("/tmp/季度报告 final.pdf"),
+            "生成结果里应当内嵌所选路径：\n{js}"
+        );
+        // 占位符必须被替换干净 —— 留着它就说明脚本还会走「弹选择框」那条分支
+        assert!(
+            !js.contains("const srcPath: string | null = null"),
+            "占位常量应当已被替换：\n{js}"
+        );
+    }
+
+    /// 路径里的引号、反斜杠、换行都要能被安全转义（不能拼出一个语法错误的脚本）。
+    #[test]
+    fn transfer_script_escapes_hostile_paths() {
+        for path in [
+            r#"/tmp/a"b.pdf"#,
+            r"/tmp/back\slash.pdf",
+            "/tmp/line\nbreak.pdf",
+        ] {
+            let js = transfer_script_with_path(path)
+                .unwrap_or_else(|e| panic!("路径 {path:?} 应当能生成脚本：{e}"));
+            assert!(!js.is_empty());
+        }
+    }
 }

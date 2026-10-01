@@ -6,6 +6,7 @@
 //! 替代原 winit + tray-icon + global-hotkey 三件套。
 
 mod cancel;
+mod capture;
 mod commands;
 mod config;
 mod console_panel;
@@ -446,6 +447,30 @@ pub fn run() {
                         }
                     });
                 }
+                tray::M_SEND_FILE => {
+                    let app_clone = app.clone();
+                    spawn(async move {
+                        // 先选文件：取消就什么都不做（取消不是错误，不弹提醒）
+                        let picked = commands::pick_file_to_send(app_clone.clone()).await;
+                        let path = match picked {
+                            Ok(Some(path)) => path,
+                            Ok(None) => return,
+                            Err(e) => {
+                                crate::notify::notify("ClipBeam", &format!("选择文件失败: {e}"));
+                                return;
+                            }
+                        };
+                        if let Err(e) = commands::start_file_transfer(
+                            app_clone.clone(),
+                            app_clone.state::<worker::WorkerState>(),
+                            path,
+                        )
+                        .await
+                        {
+                            crate::notify::notify("ClipBeam", &e);
+                        }
+                    });
+                }
                 tray::M_SCRIPTS => open_scripting_window(app),
                 tray::M_SETTINGS => {
                     // 只发给主窗口。`app.emit` 会广播给**所有**窗口，而脚本窗口跑的是同一套
@@ -489,6 +514,8 @@ pub fn run() {
             commands::start_recv,
             commands::start_deploy_type,
             commands::deploy_copy,
+            commands::pick_file_to_send,
+            commands::start_file_transfer,
             commands::cancel_task,
             commands::set_standby_paused,
             commands::get_task_status,

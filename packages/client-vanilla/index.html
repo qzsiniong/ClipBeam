@@ -275,6 +275,30 @@
         letter-spacing: 0.5px;
       }
 
+      /* 文件接收的反馈二维码：常驻固定角落，尺寸小、不挡内容，宿主随时可截屏读取 */
+      .fb {
+        position: fixed;
+        right: 14px;
+        bottom: 14px;
+        z-index: 9000;
+        background: #fff;
+        padding: 8px;
+        border-radius: 10px;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+      }
+
+      .fb-box {
+        display: block;
+        width: 148px;
+        height: 148px;
+      }
+
+      .fb-box > * {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
       .row {
         display: flex;
         gap: 10px;
@@ -365,6 +389,23 @@
           <div class="qr-tip" id="qrTip">点击任意处关闭</div>
         </div>
       </div>
+
+      <div class="card">
+        <h2>③ 接收文件（宿主机 → 远程）</h2>
+        <div class="hint">
+          宿主机用脚本把文件分片逐键发进来，本页拼片、校验整文件 MD5 后写入你选的目录。
+          中断后重发会自动<b>跳过已收分片</b>。右下角二维码是给宿主机读的进度反馈。
+        </div>
+        <div class="row">
+          <button id="dirBtn">选择保存目录</button>
+        </div>
+        <div class="bar" id="fbBar"><i></i></div>
+        <div class="status" id="fbStatus">尚未选择保存目录</div>
+      </div>
+    </div>
+
+    <div class="fb">
+      <div class="fb-box" id="fbQr"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

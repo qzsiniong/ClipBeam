@@ -23,11 +23,14 @@ pub mod chunks;
 pub mod crc32;
 pub mod data;
 pub mod file;
+pub mod format;
 pub mod gzip;
 pub mod hex;
 pub mod interaction;
 pub mod lzma;
 pub mod md5;
+pub mod path;
+pub mod screen;
 pub mod zstd;
 
 /// 声明一个能力扩展：一次写清「挂哪些函数」与「签名是什么」。
@@ -204,5 +207,10 @@ pub fn extensions() -> Vec<Arc<dyn ScriptExtension>> {
         Arc::new(interaction::ConfirmExtension),
         Arc::new(interaction::PickPathExtension),
         Arc::new(interaction::RequestFocusExtension),
+        // 屏幕扫描（远程屏幕上的二维码读回本机）
+        Arc::new(screen::ScanQrExtension),
+        // 纯计算工具：路径字符串与展示格式化（不依赖宿主）
+        Arc::new(path::PathExtension),
+        Arc::new(format::FormatExtension),
     ]
 }

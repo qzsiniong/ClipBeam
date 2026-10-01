@@ -1,4 +1,5 @@
-//! E2E（离线部分）：解码 qrcode-generator 生成的二维码 GIF 帧 → 组包 → CRC 校验 → 还原文本。
+//! E2E（离线部分）：解码 qrcode-generator 生成的二维码 GIF 帧 → 按批次组包 →
+//! 整条消息 CRC 校验 → 还原文本。对应 Q 通道的 `QBA`（剪贴板）消息。
 //! 用法：cargo run --example qr_e2e -- /tmp/cbqr/*.gif
 //! 参数顺序任意（模拟截屏时帧乱序出现）。
 #![allow(dead_code)]
@@ -11,7 +12,7 @@ use std::process::ExitCode;
 use image::imageops::grayscale;
 use rqrr::PreparedImage;
 
-use protocol::{b32_decode, crc32, parse_qr_frame};
+use protocol::{b32_decode, parse_q_frame, q_payload_crc, Q_MAGIC_CLIP};
 
 fn main() -> ExitCode {
     let paths: Vec<String> = std::env::args().skip(1).collect();
@@ -20,8 +21,8 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // key = (crc, total)，模拟 receive.rs 的批次收集。
-    let mut batch: Option<(u32, usize, HashMap<usize, String>)> = None;
+    // 批次键 = (crc, total)，模拟 receive.rs 的收集过程；crc 是**整条消息**的摘要。
+    let mut batch: Option<(String, usize, HashMap<usize, String>)> = None;
     let mut decoded_frames = 0;
 
     for path in &paths {
@@ -39,17 +40,21 @@ fn main() -> ExitCode {
             let Ok((_, content)) = grid.decode() else {
                 continue;
             };
-            let Some(f) = parse_qr_frame(&content) else {
+            let Some(f) = parse_q_frame(&content) else {
                 continue;
             };
+            // 只关心剪贴板载荷；控制消息是文件传输的反馈，不走这条路
+            if f.magic != Q_MAGIC_CLIP {
+                continue;
+            }
             decoded_frames += 1;
             match &mut batch {
                 Some((crc, total, map)) if *crc == f.crc && *total == f.total => {
-                    map.entry(f.index).or_insert(f.data);
+                    map.entry(f.index).or_insert(f.payload);
                 }
                 _ => {
                     let mut map = HashMap::new();
-                    map.insert(f.index, f.data);
+                    map.insert(f.index, f.payload);
                     batch = Some((f.crc, f.total, map));
                 }
             }
@@ -69,8 +74,8 @@ fn main() -> ExitCode {
     for i in 0..total {
         joined.push_str(map.get(&i).unwrap());
     }
-    if crc32(joined.as_bytes()) != crc {
-        eprintln!("CRC 校验失败");
+    if q_payload_crc(&joined) != crc {
+        eprintln!("整条消息 CRC 校验失败");
         return ExitCode::FAILURE;
     }
     let raw = b32_decode(&joined).expect("base32");

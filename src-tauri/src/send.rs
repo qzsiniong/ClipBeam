@@ -1,4 +1,4 @@
-//! 宿主机 → 远程：读本机剪贴板文本 → 组键盘帧 → enigo 逐键发送（协议 A）。
+//! 宿主机 → 远程：读本机剪贴板文本 → 组 K 帧（`kba`）→ 逐键发送。
 
 use std::sync::Arc;
 
@@ -59,15 +59,11 @@ pub fn run_once(
         ));
     }
 
-    // 2. 组帧（按配置决定是否启用 zstd 压缩）
+    // 2. 组帧（按配置决定是否尝试 zstd；压不小会自动回退未压缩）
     let frame = if raw {
         text.to_string()
     } else {
-        if cfg.compress {
-            crate::protocol::build_keyboard_frame_compressed(&text)
-        } else {
-            crate::protocol::build_keyboard_frame(&text)
-        }
+        crate::protocol::build_text_frame(&text, cfg.compress)
     };
 
     let frame_chars = frame.chars().count();

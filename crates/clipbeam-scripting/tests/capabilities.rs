@@ -28,6 +28,15 @@ struct TestHost {
     pick_answer: Mutex<Option<PathBuf>>,
     /// `$.pick_path` 收到的 `(prompt, kind)`，按调用顺序。
     pick_requests: Mutex<Vec<(String, PickKind)>>,
+    /// `$.scan_qr` 的回答队列：每次调用弹一个；队列空时回退到 `qr_sticky`。
+    ///
+    /// 队列语义是刻意的：脚本会反复扫屏等状态变化，而「先 READY、后 FINISH」这种时序
+    /// 只有按次给答案才能模拟。
+    qr_answers: Mutex<std::collections::VecDeque<String>>,
+    /// 队列空时一直返回的答案（`None` = 没扫到 / 环境不支持屏幕访问）。
+    qr_sticky: Mutex<Option<String>>,
+    /// `$.scan_qr` 被调用了几次。
+    qr_calls: AtomicUsize,
 }
 
 impl Default for TestHost {
@@ -43,6 +52,10 @@ impl Default for TestHost {
             // 默认「没选到」：不调用 pick_path 的测试不受影响
             pick_answer: Mutex::new(None),
             pick_requests: Mutex::new(Vec::new()),
+            // 默认没有二维码可读：等价于「命令行 / 没有屏幕访问」
+            qr_answers: Mutex::new(std::collections::VecDeque::new()),
+            qr_sticky: Mutex::new(None),
+            qr_calls: AtomicUsize::new(0),
         }
     }
 }
@@ -135,6 +148,18 @@ impl ScriptHost for TestHost {
             .unwrap()
             .push((prompt.to_string(), kind));
         Ok(self.pick_answer.lock().unwrap().clone())
+    }
+
+    /// `$.scan_qr`：先弹队列，队列空时用粘住的答案。
+    ///
+    /// 默认（队列空 + 没粘住）返回 `None`，与命令行宿主一致 ——
+    /// 于是「宿主不支持屏幕访问」这条降级路径在测试里就是默认行为。
+    fn scan_qr(&self) -> Result<Option<String>, HostError> {
+        self.qr_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(answer) = self.qr_answers.lock().unwrap().pop_front() {
+            return Ok(Some(answer));
+        }
+        Ok(self.qr_sticky.lock().unwrap().clone())
     }
 }
 
@@ -1629,7 +1654,7 @@ fn methods_declared_in_spec() -> Vec<String> {
 #[test]
 fn extensions_are_listed() {
     let extensions = extensions();
-    assert_eq!(extensions.len(), 16, "应当有 16 个使用方扩展");
+    assert_eq!(extensions.len(), 19, "应当有 19 个使用方扩展");
 
     let names: Vec<String> = extensions
         .iter()
@@ -1638,9 +1663,23 @@ fn extensions_are_listed() {
         .collect();
 
     assert_eq!(names.first().map(String::as_str), Some("bytes"));
-    assert_eq!(names.last().map(String::as_str), Some("request_focus"));
+    assert_eq!(names.last().map(String::as_str), Some("format_bytes"));
     assert!(names.contains(&"md5".to_string()));
     assert!(names.contains(&"type_str".to_string()));
+    // 纯计算工具（不依赖宿主）：路径字符串与展示格式化
+    for expected in [
+        "basename",
+        "dirname",
+        "extname",
+        "stem",
+        "format_duration",
+        "format_bytes",
+    ] {
+        assert!(
+            names.contains(&expected.to_string()),
+            "能力清单缺少 {expected}"
+        );
+    }
     assert!(
         !names.contains(&"sleep".to_string()),
         "sleep 是引擎提供的标准全局，不该出现在能力清单里"
@@ -1652,7 +1691,7 @@ fn extensions_are_listed() {
 fn runtime_options_helper_has_all_extensions() {
     let console: Arc<dyn ConsoleHook> = Arc::new(StdoutConsole);
     let options = runtime_options(Arc::new(TestHost::default()), console);
-    assert_eq!(options.extensions.len(), 16);
+    assert_eq!(options.extensions.len(), 19);
     assert!(options.prepare.is_some(), "宿主应当通过 prepare 钩子注入");
     assert_eq!(
         options.namespace.as_deref(),
@@ -1671,4 +1710,240 @@ fn extension_trait_is_object_safe() {
     let extension: Arc<dyn ScriptExtension> =
         Arc::new(clipbeam_scripting::extensions::md5::Md5Extension);
     assert_eq!(extension.spec().len(), 1);
+}
+
+// ── 纯计算工具：路径字符串与展示格式化 ──────────────────────────────────────
+
+/// `$.basename/dirname/extname/stem` 的边界表（与 `extensions/path.rs` 的单测同一张表）。
+///
+/// 在能力层再跑一遍是有意义的：`extensions/path.rs` 的单测直接调内部函数，
+/// 而这里走的是「JS 能看见的绑定」—— 参数个数、返回类型、命名都不能漂移。
+#[tokio::test]
+async fn path_helpers_boundary_table() {
+    let runtime = compute_runtime().await;
+
+    let values: Vec<String> = runtime
+        .eval(
+            r#"
+            const cases = [
+              ["/a/b/c.txt", "c.txt", "/a/b", ".txt", "c"],
+              ["/a/b/", "b", "/a", "", "b"],
+              ["/a", "a", "", "", "a"],
+              ["c.txt", "c.txt", "", ".txt", "c"],
+              ["C:\\x\\y.ZIP", "y.ZIP", "C:\\x", ".ZIP", "y"],
+              ["a/b/.bashrc", ".bashrc", "a/b", "", ".bashrc"],
+              ["a/b/c.tar.gz", "c.tar.gz", "a/b", ".gz", "c.tar"],
+              ["a/b/c.", "c.", "a/b", ".", "c"],
+              ["", "", "", "", ""],
+              ["/", "", "", "", ""],
+              ["//a//b//", "b", "//a", "", "b"],
+            ];
+            const out = [];
+            for (const [input, base, dir, ext, stem] of cases) {
+              out.push([
+                $.basename(input) === base ? "ok" : `basename=${JSON.stringify($.basename(input))} want ${JSON.stringify(base)}`,
+                $.dirname(input) === dir ? "ok" : `dirname=${JSON.stringify($.dirname(input))} want ${JSON.stringify(dir)}`,
+                $.extname(input) === ext ? "ok" : `extname=${JSON.stringify($.extname(input))} want ${JSON.stringify(ext)}`,
+                $.stem(input) === stem ? "ok" : `stem=${JSON.stringify($.stem(input))} want ${JSON.stringify(stem)}`,
+              ].join(","));
+            }
+            out
+            "#,
+        )
+        .await
+        .expect("脚本执行失败");
+
+    for (i, result) in values.iter().enumerate() {
+        assert!(
+            result.split(',').all(|part| part == "ok"),
+            "边界表第 {i} 条不通过：{result}"
+        );
+    }
+}
+
+/// 两种分隔符混用也按同一规则切（跨平台行为一致）。
+#[tokio::test]
+async fn path_helpers_mixed_separators() {
+    let runtime = compute_runtime().await;
+    let values: Vec<String> = runtime
+        .eval(
+            r#"
+            [
+              $.basename("a\\b/c.txt"),
+              $.dirname("a\\b/c.txt"),
+              $.basename("a/b\\c.txt"),
+              $.dirname("a/b\\c.txt"),
+            ]
+            "#,
+        )
+        .await
+        .expect("脚本执行失败");
+
+    assert_eq!(values[0], "c.txt");
+    assert_eq!(values[1], "a\\b");
+    assert_eq!(values[2], "c.txt");
+    assert_eq!(values[3], "a/b");
+}
+
+/// `$.format_duration` / `$.format_bytes`：与 Rust 侧实现交叉验证 + 边界。
+#[tokio::test]
+async fn format_helpers_boundary_table() {
+    let runtime = compute_runtime().await;
+
+    let values: Vec<String> = runtime
+        .eval(
+            r#"
+            [
+              $.format_duration(0),
+              $.format_duration(45),
+              $.format_duration(59.9),
+              $.format_duration(60),
+              $.format_duration(83),
+              $.format_duration(3600),
+              $.format_duration(3661),
+              $.format_duration(-5),
+              $.format_bytes(0),
+              $.format_bytes(512),
+              $.format_bytes(1023),
+              $.format_bytes(1024),
+              $.format_bytes(1536),
+              $.format_bytes(1048576),
+              $.format_bytes(1610612736),
+              $.format_bytes(-1),
+            ]
+            "#,
+        )
+        .await
+        .expect("脚本执行失败");
+
+    assert_eq!(
+        values,
+        vec![
+            "0s", "45s", "59s", "1m0s", "1m23s", "1h0m0s", "1h1m1s", "0s", "0B", "512B", "1023B",
+            "1.0KB", "1.5KB", "1.00MB", "1.50GB", "0B",
+        ]
+    );
+}
+
+/// `$.md5` 的五种格式：与 Rust 侧独立实现（`md-5` / `data-encoding`）交叉验证。
+#[tokio::test]
+async fn md5_formats_match_rust() {
+    let payload: Vec<u8> = (0u8..=255).collect();
+    let path = write_temp_file("md5-formats.bin", &payload);
+    let runtime = compute_runtime().await;
+
+    let values: Vec<String> = runtime
+        .eval(&format!(
+            r#"
+            const bytes = await $.read({path});
+            [
+              $.md5(bytes),
+              $.md5(bytes, "hex"),
+              $.md5(bytes, "hex_upper"),
+              $.md5(bytes, "base32"),
+              $.md5(bytes, "base32_lower"),
+              $.md5(bytes, "base64"),
+            ]
+            "#,
+            path = js_path(&path)
+        ))
+        .await
+        .expect("脚本执行失败");
+    let _ = std::fs::remove_file(&path);
+
+    use md5::{Digest, Md5};
+    let digest = Md5::digest(&payload);
+    let hex_lower = hex::encode(digest);
+    let hex_upper = hex::encode_upper(digest);
+
+    assert_eq!(values[0], hex_lower, "默认仍是小写十六进制（向后兼容）");
+    assert_eq!(values[1], hex_lower, "显式 hex 与默认一致");
+    assert_eq!(values[2], hex_upper, "hex_upper");
+    assert_eq!(values[3], data_encoding::BASE32_NOPAD.encode(&digest));
+    assert_eq!(
+        values[4],
+        data_encoding::BASE32_NOPAD
+            .encode(&digest)
+            .to_ascii_lowercase()
+    );
+    assert_eq!(values[5], data_encoding::BASE64_NOPAD.encode(&digest));
+
+    // 长度：32 / 32 / 32 / 26 / 26 / 22
+    assert_eq!(values[3].len(), 26);
+    assert_eq!(values[4].len(), 26);
+    assert_eq!(values[5].len(), 22);
+}
+
+/// **协议指纹的约定**：`$.md5(x, "base32_lower")` 编的是**原始 16 字节**，
+/// 不是十六进制字符串。这条专门钉住曾经踩过的坑。
+#[tokio::test]
+async fn md5_base32_encodes_raw_digest_not_hex_string() {
+    let runtime = compute_runtime().await;
+
+    let values: Vec<String> = runtime
+        .eval(
+            r#"
+            const data = new TextEncoder().encode("clipbeam");
+            const viaFormat = $.md5(data, "base32_lower");   // 正确：编原始 16 字节
+            const hexString = $.md5(data);                   // 32 字符十六进制
+            const wrongWay = $.base32_lower_nopad(hexString); // 错误：编 hex 串
+            [viaFormat, String(viaFormat.length), wrongWay, String(wrongWay.length), hexString]
+            "#,
+        )
+        .await
+        .expect("脚本执行失败");
+
+    // 正确写法编的是 16 字节 → 26 字符；错误写法编 32 字符的 hex 串 → 52 字符
+    assert_eq!(values[1], "26", "正确写法应当是 26 字符");
+    assert_eq!(values[3], "52", "对 hex 串做 base32 会得到 52 字符");
+    assert_ne!(values[0], values[2], "两者必须不同（这正是要防的错）");
+
+    // 正确结果只含 `[a-z2-7]`，可直接进协议帧的字段
+    assert!(
+        values[0]
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b)),
+        "base32_lower 结果只应含 [a-z2-7]，实际 {}",
+        values[0]
+    );
+
+    // 而**十六进制**里会出现 `0`/`1` —— 所以它绝不能直接当协议字段用
+    // （base32 的输出当然不含 0/1，那正是它安全的原因）
+    assert!(
+        values[4].contains('0') || values[4].contains('1'),
+        "这个例子的 hex 摘要应当含 0/1 才说明问题，实际 {}",
+        values[4]
+    );
+
+    // 与 Rust 侧独立实现对齐：base32(md5 的 16 字节)
+    use md5::{Digest, Md5};
+    let expected = data_encoding::BASE32_NOPAD
+        .encode(&Md5::digest(b"clipbeam"))
+        .to_ascii_lowercase();
+    assert_eq!(values[0], expected);
+}
+
+/// 未知的 md5 格式要报错并列出可用取值（不静默回退）。
+#[tokio::test]
+async fn md5_rejects_unknown_format() {
+    let runtime = compute_runtime().await;
+    let message: String = runtime
+        .eval(
+            r#"
+            try {
+              $.md5("x", "base16");
+              "没有抛错"
+            } catch (err) {
+              err.message
+            }
+            "#,
+        )
+        .await
+        .expect("脚本执行失败");
+
+    assert!(message.contains("base16"), "错误里应带非法取值：{message}");
+    assert!(
+        message.contains("base32_lower"),
+        "错误里应列可用取值：{message}"
+    );
 }

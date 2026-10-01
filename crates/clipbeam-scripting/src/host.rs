@@ -166,6 +166,18 @@ pub trait ScriptHost: Send + Sync + 'static {
         Ok(FileDecision::Allow)
     }
 
+    /// 截屏一次并解出画面中的二维码文本（`$.scan_qr`）。
+    ///
+    /// 返回 `Ok(None)` 表示**这次没读到东西**：画面里没有二维码，或者当前宿主根本没有
+    /// 屏幕访问（headless / 命令行）。两种情形在脚本侧的语义相同 —— 该重试或降级 ——
+    /// 与 [`ScriptHost::pick_path`] 在没有选择界面时返回 `Ok(None)` 是同一个思路。
+    ///
+    /// 实现应当只截一次、只解一次：**轮询节奏是脚本的事**（`await sleep()` 自己排），
+    /// 只有脚本作者知道该等多久。
+    fn scan_qr(&self) -> Result<Option<String>, HostError> {
+        Ok(None)
+    }
+
     /// 任务是否已被取消。
     fn cancelled(&self) -> bool {
         false

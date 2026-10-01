@@ -227,6 +227,7 @@ fn extensions_are_opt_in() {
         runtime_options(Arc::new(NoopHost), console)
             .extensions
             .len(),
-        16
+        19,
+        "注入的扩展数量应当与 extensions() 一致（新增能力时两处都要改）"
     );
 }
