@@ -841,7 +841,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "clipbeam"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "arboard",
  "clap",
@@ -879,7 +879,7 @@ dependencies = [
 
 [[package]]
 name = "clipbeam-plugins"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "clipbeam-plugins",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "clipbeam-scripting"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "brotli",
@@ -5323,7 +5323,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "script-engine"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "encoding_rs",
