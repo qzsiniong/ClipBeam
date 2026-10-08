@@ -69,8 +69,13 @@ const gapMs: number = 120;
 // ─── 远端文件名 ──────────────────────────────────────────────────────────────
 
 // 远端文件名一律从**源文件名**派生，所以跑完一眼就能看出这批分片是哪个文件的。
-// `path.split("/").pop()` 在只有 `/` 分隔符时是安全的；顺带兜住末尾带 `/` 的写法
-const base: string = srcPath.split("/").pop() || "payload";
+//
+// 用 `$.basename`：它**同时按 `/` 与 `\` 切**，两端行为一致。
+// 不要写成 `srcPath.split("/").pop()` —— Windows 路径里一个 `/` 都没有，
+// 那会把**整条路径**当成文件名（`C:\Users\…\sample.bin`），于是敲给远端的是
+// `cat <<'EOF' > C:\Users\…\sample.bin.meta`：在远端的 bash 里毫无意义，
+// 整个还原流程都是坏的。这个坑在 Unix 上不会发作（路径自带 `/`），只会在 Windows 上炸。
+const base: string = $.basename(srcPath) || "payload";
 // 还原脚本在远端的三个名字：base32 传输体、解码后的脚本本体、元信息
 const restoreB32Name: string = `restore.sh.b32`;
 const restorePath: string = "restore.sh";

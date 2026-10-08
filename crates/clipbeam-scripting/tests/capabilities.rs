@@ -1310,6 +1310,55 @@ async fn typescript_seed_script_runs_end_to_end() {
     assert!(typed.contains("编码与压缩往返"), "应当输出标题：{typed}");
 }
 
+/// 文件名派生必须**跨平台**：从路径里取的是「文件名」，不是「整条路径」。
+///
+/// 为什么需要单独一条：上面那条 e2e 的输入路径由平台决定 —— Windows 传进来的路径
+/// 自带 `\`，而旧写法（`split("/")`）会把整条路径当文件名，于是**只有 Windows 会红**；
+/// ubuntu / macOS 的路径自带 `/`，同一个 bug 在那两个平台上恰好不发作，能一路混过去。
+///
+/// 这里故意把**叶子名字里塞进反斜杠**（Unix 合法、Windows 非法），在 unix 上以平台无关的
+/// 方式复现同一个错误：旧写法得到 `C:\dir\sample.bin.meta`，正确写法得到 `sample.bin.meta`。
+#[cfg(unix)]
+#[tokio::test]
+async fn seed_pack_and_shard_derives_file_name_from_path() {
+    let dir = temp_dir("seed-path-base");
+    // 叶子名里含反斜杠。`temp_dir` 已经建好目录，`join` 出来的这一段在 Unix 上只是文件名。
+    let leaf = r"C:\dir\sample.bin";
+    let target = dir.join(leaf);
+    std::fs::write(&target, b"payload-for-name-derivation").expect("写入测试文件失败");
+
+    let host = Arc::new(TestHost::with_answer(ConfirmChoice::Yes));
+    let runtime = runtime_with(host.clone()).await;
+
+    let source = include_str!("../seed/03-pack-and-shard.ts")
+        .replace("'~/clipbeam-quick-start.txt'", &js_path(&target));
+    let source = clipbeam_scripting::ts::transpile(&source, Path::new("03-pack-and-shard.ts"))
+        .expect("示例 TS 应当能转译");
+
+    runtime
+        .run_named_script("03-pack-and-shard.ts", &source)
+        .await
+        .expect("示例脚本应当跑通");
+
+    let sections = parse_heredocs(&host.typed());
+
+    // 正确行为：名字一律由**文件名**派生
+    section(&sections, "sample.bin.meta");
+    section(&sections, "sample.bin.gz.b32.p0001");
+    assert!(
+        sections.iter().any(|(name, _)| name == "restore.sh.b32"),
+        "还原脚本段应当存在：{:?}",
+        sections.iter().map(|(n, _)| n).collect::<Vec<_>>()
+    );
+
+    // 反证：段名里绝不能出现路径片段（旧写法正是把整条路径塞进了名字）
+    let names: Vec<&str> = sections.iter().map(|(n, _)| n.as_str()).collect();
+    assert!(
+        !names.iter().any(|name| name.contains(r"C:\dir")),
+        "段名里不该出现路径，实际：{names:?}"
+    );
+}
+
 /// 从 `$.type_str` 的 transcript 里拆出 heredoc：每段形如
 /// `cat <<'EOF' > <名字>\n<正文>\nEOF\n`，返回 `(名字, 正文)`。
 ///
