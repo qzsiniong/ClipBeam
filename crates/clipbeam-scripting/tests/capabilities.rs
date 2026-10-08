@@ -207,8 +207,14 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 /// 把路径转成能嵌进 JS 字符串的字面量。
+/// 把路径变成可直接嵌进脚本字符串字面量的形式（含引号，已转义）。
+///
+/// **不要再自己 `.replace('\\', "\\\\")`**：`{:?}`（`str` 的 `Debug`）本身就会转义反斜杠，
+/// 再替换一次会**双重转义** —— Windows 上脚本拿到的路径会变成
+/// `C:\\Users\\…`（分隔符翻倍）而不是 `C:\Users\…`。
+/// Unix 上路径没有反斜杠，所以这个错在那边的表现是「完全看不出来」。
 fn js_path(path: &Path) -> String {
-    format!("{:?}", path.to_string_lossy().replace('\\', "\\\\"))
+    format!("{:?}", path.to_string_lossy())
 }
 
 /// 建一个「装了 ClipBeam 全部能力 + 测试宿主」的运行时。

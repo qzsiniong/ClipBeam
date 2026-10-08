@@ -187,6 +187,60 @@ mod tests {
         );
     }
 
+    /// 仓库根目录（从本 crate 的 `CARGO_MANIFEST_DIR` 往上两级）。
+    fn repo_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("拿不到仓库根目录")
+            .to_path_buf()
+    }
+
+    /// 找一个**本平台能真正执行**的 `tsc`；找不到返回 `None`，调用方跳过测试。
+    ///
+    /// 与 `clipbeam-scripting/src/declarations.rs` 里的同名函数是**故意重复**的两份：
+    /// 两个 crate 之间没有共享的测试支撑 crate，为这 20 行引入一个依赖不划算。
+    /// 改这里时记得同步那边。
+    ///
+    /// 为什么不能只用 `node_modules/.bin/tsc`：pnpm/npm 在 Windows 上会同时生成
+    /// `tsc`（POSIX sh 脚本）、`tsc.cmd`、`tsc.ps1`。无扩展名那个 `is_file()` 为**真**，
+    /// 于是「找不到就跳过」的兜底失效，而它是 `#!/bin/sh`、`CreateProcess` 起不来
+    /// （os error 193）—— 测试直接 panic。CI 的 ubuntu job 不跑 `pnpm install`，
+    /// 文件根本不存在，所以这个坑只在 Windows 上暴露。
+    ///
+    /// 所以**优先走 `node` + typescript 的入口脚本**：两端行为完全一致，不碰垫片的
+    /// 平台差异（`node` 由 CI 的 setup-node 保证）；垫片只作为兜底。
+    fn tsc_command(root: &std::path::Path) -> Option<std::process::Command> {
+        let entry = root.join("node_modules/typescript/lib/tsc.js");
+        if entry.is_file() {
+            let mut cmd = std::process::Command::new("node");
+            cmd.arg(entry);
+            return Some(cmd);
+        }
+        let shim = if cfg!(windows) {
+            root.join("node_modules/.bin/tsc.cmd")
+        } else {
+            root.join("node_modules/.bin/tsc")
+        };
+        shim.is_file().then(|| std::process::Command::new(shim))
+    }
+
+    /// 跑一次 `tsc -p <tsconfig>`。
+    ///
+    /// `None` = 这个环境没有可用的 tsc，**应当跳过测试**（只跑 cargo 的 CI job，
+    /// 或者垫片存在但本平台起不来）。前端流水线里的 `typecheck:examples` 兜住仓库侧，
+    /// 所以跳过不会丢覆盖率。
+    fn run_tsc(root: &std::path::Path, project: &std::path::Path) -> Option<std::process::Output> {
+        let mut cmd = tsc_command(root)?;
+        match cmd.arg("-p").arg(project).output() {
+            Ok(output) => Some(output),
+            Err(err) => {
+                eprintln!("跳过：tsc 存在但无法启动（{err}）");
+                None
+            }
+        }
+    }
+
     /// 四个文件都写进去之后，**用真正的 tsc 检查一次**用户视角的插件。
     ///
     /// 这是这整件事的验收标准：光「文件写出来了」不算数，
@@ -196,14 +250,9 @@ mod tests {
     /// 前端那条流水线里有 `typecheck:examples` 兜住仓库侧。
     #[test]
     fn user_directory_typechecks_and_catches_mistakes() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(std::path::Path::parent)
-            .expect("拿不到仓库根目录")
-            .to_path_buf();
-        let tsc = root.join("node_modules/.bin/tsc");
-        if !tsc.is_file() {
-            eprintln!("跳过：找不到 {}（先跑 pnpm install）", tsc.display());
+        let root = repo_root();
+        if tsc_command(&root).is_none() {
+            eprintln!("跳过：找不到可用的 tsc（先跑 pnpm install）");
             return;
         }
 
@@ -222,11 +271,9 @@ $plugin.toast('hi', { level: 'success' })
 "#;
         std::fs::write(dir.join("my-plugin.ts"), good).unwrap();
 
-        let first = std::process::Command::new(&tsc)
-            .arg("-p")
-            .arg(dir.join(TSCONFIG))
-            .output()
-            .expect("无法启动 tsc");
+        let Some(first) = run_tsc(&root, &dir.join(TSCONFIG)) else {
+            return;
+        };
         assert!(
             first.status.success(),
             "正常插件应当通过类型检查：\n{}\n{}",
@@ -239,11 +286,9 @@ $plugin.toast('hi', { level: 'success' })
         let bad = good.replace("{ level: 'success' }", "{ level: 'warn' }");
         std::fs::write(dir.join("my-plugin.ts"), bad).unwrap();
 
-        let second = std::process::Command::new(&tsc)
-            .arg("-p")
-            .arg(dir.join(TSCONFIG))
-            .output()
-            .expect("无法启动 tsc");
+        let Some(second) = run_tsc(&root, &dir.join(TSCONFIG)) else {
+            return;
+        };
         assert!(
             !second.status.success(),
             "写错的插件必须被类型检查抓住（否则声明没真正生效）"
@@ -265,14 +310,9 @@ $plugin.toast('hi', { level: 'success' })
     /// 说明用户照抄示例不会撞到类型错误。
     #[test]
     fn seeded_example_typechecks_against_generated_declarations() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(std::path::Path::parent)
-            .expect("拿不到仓库根目录")
-            .to_path_buf();
-        let tsc = root.join("node_modules/.bin/tsc");
-        if !tsc.is_file() {
-            eprintln!("跳过：找不到 {}（先跑 pnpm install）", tsc.display());
+        let root = repo_root();
+        if tsc_command(&root).is_none() {
+            eprintln!("跳过：找不到可用的 tsc（先跑 pnpm install）");
             return;
         }
 
@@ -286,11 +326,9 @@ $plugin.toast('hi', { level: 'success' })
         )
         .unwrap();
 
-        let output = std::process::Command::new(&tsc)
-            .arg("-p")
-            .arg(dir.join(TSCONFIG))
-            .output()
-            .expect("无法启动 tsc");
+        let Some(output) = run_tsc(&root, &dir.join(TSCONFIG)) else {
+            return;
+        };
 
         assert!(
             output.status.success(),

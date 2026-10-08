@@ -145,13 +145,6 @@ fn build_k_frame(magic: &str, flags: u8, tail: &str) -> String {
     format!("{K_SEP}{magic}{K_SEP}{flags_char}{K_SEP}{crc}{K_SEP}{tail}{K_END}")
 }
 
-/// 十六进制 → 字节（把系统 md5 工具输出的十六进制还原成 16 字节，再 base32 比对）。
-fn hex_decode(text: &str) -> Vec<u8> {
-    (0..text.len() / 2)
-        .map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).expect("md5 应当是合法十六进制"))
-        .collect()
-}
-
 /// `num(n)` 的逆：base32 解出十进制串 → 数值；解不出返回 `None`（解析器用它做拒绝路径）。
 fn try_decode_num(field: &str) -> Option<u64> {
     let bytes = BASE32_NOPAD
@@ -427,25 +420,24 @@ fn reassemble(frames: &[Frame]) -> Vec<u8> {
     joined
 }
 
-/// 用系统 md5 工具独立算出文件摘要的十六进制（不复用脚本的 `$.md5`，避免两边一起错）。
-fn md5_of_file(path: &Path) -> String {
-    let output = std::process::Command::new("md5")
-        .arg("-q")
-        .arg(path)
-        .output()
-        .or_else(|_| std::process::Command::new("md5sum").arg(path).output())
-        .expect("应当有 md5 或 md5sum 可用");
-    assert!(output.status.success(), "md5 命令失败");
-    String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .next()
-        .expect("md5 输出应当有摘要")
-        .to_string()
+/// 文件的原始 16 字节 MD5。
+///
+/// 用 `md-5` crate 直接算，**不再 shell out 到系统 `md5` / `md5sum`**：那两个命令在
+/// Windows 上都不存在（Windows 只有 `certutil`，而它的输出文案随系统语言变化，
+/// 解析很脆），原来那版在 Windows 上直接 panic。
+///
+/// 独立性仍然成立：这里比的是「文件的真实 MD5」与「协议帧里 base32(md5 原始 16 字节)」
+/// 是否一致，所以 **hex/base32 混用、对压缩后字节算摘要** 这类真 bug 照样会被抓住 ——
+/// 而那正是这个断言存在的意义。
+fn md5_bytes_of_file(path: &Path) -> Vec<u8> {
+    use md5::{Digest, Md5};
+    let bytes = std::fs::read(path).expect("读测试文件失败");
+    Md5::digest(&bytes).to_vec()
 }
 
 /// 探测帧里 `fileMd5` 的期望值：base32 小写无填充(原始 16 字节 md5)。
 fn file_md5_b32(path: &Path) -> String {
-    b32_lower_encode(&hex_decode(&md5_of_file(path)))
+    b32_lower_encode(&md5_bytes_of_file(path))
 }
 
 // ── 协议完整性回归（针对解析器本身，不跑 seed）───────────────────────────────

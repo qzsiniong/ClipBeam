@@ -139,21 +139,66 @@ mod tests {
         }
     }
 
+    /// 仓库根目录（从本 crate 的 `CARGO_MANIFEST_DIR` 往上两级）。
+    fn repo_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("拿不到仓库根目录")
+            .to_path_buf()
+    }
+
+    /// 找一个**本平台能真正执行**的 `tsc`；找不到返回 `None`，调用方跳过测试。
+    ///
+    /// 为什么不能只用 `node_modules/.bin/tsc`：pnpm/npm 在 Windows 上会同时生成
+    /// `tsc`（POSIX sh 脚本）、`tsc.cmd`、`tsc.ps1`。无扩展名那个 `is_file()` 为**真**，
+    /// 于是「找不到就跳过」的兜底失效，而它是 `#!/bin/sh`、`CreateProcess` 起不来
+    /// （os error 193）—— 测试直接 panic。CI 的 ubuntu job 不跑 `pnpm install`，
+    /// 文件根本不存在，所以这个坑只在 Windows 上暴露。
+    ///
+    /// 所以**优先走 `node` + typescript 的入口脚本**：两端行为完全一致，不碰垫片的
+    /// 平台差异（`node` 由 CI 的 setup-node 保证）；垫片只作为兜底。
+    fn tsc_command(root: &std::path::Path) -> Option<std::process::Command> {
+        let entry = root.join("node_modules/typescript/lib/tsc.js");
+        if entry.is_file() {
+            let mut cmd = std::process::Command::new("node");
+            cmd.arg(entry);
+            return Some(cmd);
+        }
+        let shim = if cfg!(windows) {
+            root.join("node_modules/.bin/tsc.cmd")
+        } else {
+            root.join("node_modules/.bin/tsc")
+        };
+        shim.is_file().then(|| std::process::Command::new(shim))
+    }
+
+    /// 跑一次 `tsc -p <tsconfig>`。
+    ///
+    /// `None` = 这个环境没有可用的 tsc，**应当跳过测试**（只跑 cargo 的 CI job，
+    /// 或者垫片存在但本平台起不来）。前端流水线里的 `typecheck:examples` 兜住仓库侧，
+    /// 所以跳过不会丢覆盖率。
+    fn run_tsc(root: &std::path::Path, project: &std::path::Path) -> Option<std::process::Output> {
+        let mut cmd = tsc_command(root)?;
+        match cmd.arg("-p").arg(project).output() {
+            Ok(output) => Some(output),
+            Err(err) => {
+                eprintln!("跳过：tsc 存在但无法启动（{err}）");
+                None
+            }
+        }
+    }
+
     /// 端到端：把声明写进一个「用户脚本目录」，加一个用 `$` 的 `.ts`，
     /// 然后**用真正的 tsc 检查**它有提示、且写错会被抓住。
     ///
     /// 这是本模块的验收标准 —— 光把文件写出来不算数。
-    /// 没有 `node_modules/.bin/tsc` 的环境（只跑 cargo 的 CI job）会跳过。
+    /// 没有可用 `tsc` 的环境（只跑 cargo 的 CI job）会跳过。
     #[test]
     fn user_directory_typechecks_and_catches_mistakes() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(std::path::Path::parent)
-            .expect("拿不到仓库根目录")
-            .to_path_buf();
-        let tsc = root.join("node_modules/.bin/tsc");
-        if !tsc.is_file() {
-            eprintln!("跳过：找不到 {}（先跑 pnpm install）", tsc.display());
+        let root = repo_root();
+        if tsc_command(&root).is_none() {
+            eprintln!("跳过：找不到可用的 tsc（先跑 pnpm install）");
             return;
         }
 
@@ -170,11 +215,9 @@ if (await $.confirm('继续吗？')) $.type_str(text, 10)
 "#;
         std::fs::write(dir.join("my-script.ts"), good).unwrap();
 
-        let first = std::process::Command::new(&tsc)
-            .arg("-p")
-            .arg(dir.join(TSCONFIG))
-            .output()
-            .expect("无法启动 tsc");
+        let Some(first) = run_tsc(&root, &dir.join(TSCONFIG)) else {
+            return;
+        };
         assert!(
             first.status.success(),
             "正常脚本应当通过类型检查：\n{}\n{}",
@@ -186,11 +229,9 @@ if (await $.confirm('继续吗？')) $.type_str(text, 10)
         let bad = good.replace("$.chunks('hello world', 5)", "$.chunks('hello world', 'x')");
         std::fs::write(dir.join("my-script.ts"), bad).unwrap();
 
-        let second = std::process::Command::new(&tsc)
-            .arg("-p")
-            .arg(dir.join(TSCONFIG))
-            .output()
-            .expect("无法启动 tsc");
+        let Some(second) = run_tsc(&root, &dir.join(TSCONFIG)) else {
+            return;
+        };
         assert!(
             !second.status.success(),
             "写错的脚本必须被类型检查抓住（否则声明没真正生效）"
