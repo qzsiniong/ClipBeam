@@ -1,6 +1,6 @@
 [package]
 name = "clipbeam-plugins"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "ClipBeam 插件运行框架：清单解析、目录发现、权限模型与 $plugin 能力（不含任何 Tauri 依赖）"
 license = "MIT"
